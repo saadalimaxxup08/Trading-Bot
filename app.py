@@ -172,13 +172,18 @@ if "news_last_fetched" not in st.session_state:
 # ----------------- SUPABASE AUTH & DB CLIENT -----------------
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://your-project-id.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "your-supabase-anon-key-here")
+APP_URL = os.environ.get("APP_URL", "http://localhost:8501/")
+
+# Global dictionary to store PKCE verifiers across session reloads
+if not hasattr(st, "_pending_verifiers"):
+    st._pending_verifiers = {}
 
 def get_supabase_client():
     if not SUPABASE_URL or "your-project-id" in SUPABASE_URL or "your-supabase-anon" in SUPABASE_KEY:
         return None
     try:
-        # Disable auto-refresh token and session persistence to prevent background threads hanging in Streamlit
-        options = ClientOptions(auto_refresh_token=False, persist_session=False)
+        # Use PKCE flow for secure magic links
+        options = ClientOptions(auto_refresh_token=False, persist_session=False, flow_type="pkce")
         return create_client(SUPABASE_URL, SUPABASE_KEY, options=options)
     except Exception:
         return None
@@ -261,47 +266,32 @@ def update_signal_in_db(sig):
 
 # Secure login screen check
 if supabase_client is not None:
-    # Check if redirect query parameters exist (passed by our JS redirect component)
-    if "access_token" in st.query_params:
-        access_token = st.query_params["access_token"]
-        refresh_token = st.query_params.get("refresh_token", "")
-        try:
-            res = supabase_client.auth.set_session(access_token, refresh_token)
-            if res.user:
-                st.session_state.supabase_user = res.user
-                st.query_params.clear()
-                st.rerun()
-        except Exception as e:
-            st.error(f"Failed to restore magic link session: {e}")
+    # Check if redirect query parameters exist (passed on Magic Link click)
+    if "code" in st.query_params and "email" in st.query_params:
+        code = st.query_params["code"]
+        email = st.query_params["email"]
+        code_verifier = st._pending_verifiers.get(email)
+        if code_verifier:
+            try:
+                res = supabase_client.auth.exchange_code_for_session({
+                    "auth_code": code,
+                    "code_verifier": code_verifier
+                })
+                if res.user:
+                    st.session_state.supabase_user = res.user
+                    st.query_params.clear()
+                    st._pending_verifiers.pop(email, None)
+                    st.success("Authenticated Successfully!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Failed to authenticate magic link: {e}")
+        else:
+            st.error("Authentication session expired. Please request a new magic link.")
 
     if "supabase_user" not in st.session_state:
-        # JavaScript component to read URL hash and redirect if magic link token exists
-        st.components.v1.html(
-            """
-            <script>
-            try {
-                const parentHash = window.parent.location.hash;
-                if (parentHash && parentHash.includes('access_token=')) {
-                    const params = new URLSearchParams(parentHash.replace('#', '?'));
-                    const token = params.get('access_token');
-                    const refresh = params.get('refresh_token') || '';
-                    if (token) {
-                        window.parent.location.href = window.parent.location.pathname + "?access_token=" + token + "&refresh_token=" + refresh;
-                    }
-                }
-            } catch (e) {
-                console.error("CORS block or error accessing parent window hash:", e);
-            }
-            </script>
-            """,
-            height=0,
-            width=0
-        )
-
         # Inject Premium Glowing Style Sheet for Login Portal
         st.markdown("""
         <style>
-            /* Override background for login screen specifically */
             div[data-testid="stAppViewContainer"] {
                 background: radial-gradient(circle at 50% 30%, #1a103c 0%, #030712 70%) !important;
             }
@@ -347,22 +337,32 @@ if supabase_client is not None:
 
         col_auth_l, col_auth_mid, col_auth_r = st.columns([1, 2, 1])
         with col_auth_mid:
-            # Login Form container
             st.markdown("<div class='login-container'>", unsafe_allow_html=True)
             st.markdown("<div class='glow-title'>⚡ BINARY PRO</div>", unsafe_allow_html=True)
             st.markdown("<div style='color:#a1a1aa; font-size:0.95rem; margin-bottom:30px;'>VIP Trading Access Portal</div>", unsafe_allow_html=True)
 
             if not st.session_state.otp_sent:
                 email_input = st.text_input("Enter Email to Login", placeholder="trader@example.com")
-                st.markdown("</div>", unsafe_allow_html=True) # close container for positioning input correctly
+                st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 
                 st.markdown("<div class='glow-btn'>", unsafe_allow_html=True)
                 if st.button("📩 Send Magic Link", use_container_width=True):
                     if email_input:
                         try:
-                            # Request Supabase OTP (triggers Magic Link email)
-                            res = supabase_client.auth.sign_in_with_otp({"email": email_input})
+                            # Dynamic redirect URL containing the email query parameter
+                            redirect_to = f"{APP_URL}?email={email_input}"
+                            
+                            # Request Magic Link OTP
+                            res = supabase_client.auth.sign_in_with_otp({
+                                "email": email_input,
+                                "options": {
+                                    "email_redirect_to": redirect_to
+                                }
+                            })
+                            # Capture the code verifier generated by GoTrue and store globally
+                            st._pending_verifiers[email_input] = supabase_client.auth._code_verifier
+                            
                             st.session_state.login_email = email_input
                             st.session_state.otp_sent = True
                             st.success(f"Link sent successfully!")
@@ -374,37 +374,14 @@ if supabase_client is not None:
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<h3 style='color:#ffffff; font-size:1.3rem; font-weight:700;'>🔮 Link Dispatched!</h3>", unsafe_allow_html=True)
-                st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link and verification code have been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
-                st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>You can click the link in your email to log in, or enter the 6-digit verification code below:</p>", unsafe_allow_html=True)
-                
-                otp_code = st.text_input("6-Digit Code", placeholder="123456")
+                st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link has been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
+                st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>Click the link in the email to automatically unlock this terminal!</p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                col_b1, col_b2 = st.columns(2)
-                with col_b1:
-                    if st.button("⬅️ Change Email", use_container_width=True):
-                        st.session_state.otp_sent = False
-                        st.rerun()
-                with col_b2:
-                    if st.button("✅ Verify & Enter", use_container_width=True):
-                        if otp_code:
-                            try:
-                                res = supabase_client.auth.verify_otp({
-                                    "email": st.session_state.login_email,
-                                    "token": otp_code,
-                                    "type": "magiclink"
-                                })
-                                if res.user:
-                                    st.session_state.supabase_user = res.user
-                                    st.success("Access Granted!")
-                                    st.rerun()
-                                else:
-                                    st.error("Verification failed. Invalid code.")
-                            except Exception as e:
-                                st.error(f"Error verifying code: {e}")
-                        else:
-                            st.warning("Please enter the code.")
+                if st.button("⬅️ Back / Change Email", use_container_width=True):
+                    st.session_state.otp_sent = False
+                    st.rerun()
             
             # Show SQL editor copy-paste SQL details for setup help
             st.markdown("<br><br>", unsafe_allow_html=True)
