@@ -1,0 +1,16 @@
+# Ignore local environment variables
+.env
+
+# Ignore python virtual environment
+.venv/
+venv/
+env/
+
+# Ignore python cache files
+__pycache__/
+*.pyc
+
+# Ignore local signal logs and news caches
+news_cache.json
+signals_db.json
+.streamlit/
