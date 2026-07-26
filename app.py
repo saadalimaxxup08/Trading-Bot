@@ -261,11 +261,47 @@ def update_signal_in_db(sig):
 
 # Secure login screen check
 if supabase_client is not None:
+    # Check if redirect query parameters exist (passed by our JS redirect component)
+    if "access_token" in st.query_params:
+        access_token = st.query_params["access_token"]
+        refresh_token = st.query_params.get("refresh_token", "")
+        try:
+            res = supabase_client.auth.set_session(access_token, refresh_token)
+            if res.user:
+                st.session_state.supabase_user = res.user
+                st.query_params.clear()
+                st.rerun()
+        except Exception as e:
+            st.error(f"Failed to restore magic link session: {e}")
+
     if "supabase_user" not in st.session_state:
+        # JavaScript component to read URL hash and redirect if magic link token exists
+        st.components.v1.html(
+            """
+            <script>
+            try {
+                const parentHash = window.parent.location.hash;
+                if (parentHash && parentHash.includes('access_token=')) {
+                    const params = new URLSearchParams(parentHash.replace('#', '?'));
+                    const token = params.get('access_token');
+                    const refresh = params.get('refresh_token') || '';
+                    if (token) {
+                        window.parent.location.href = window.parent.location.pathname + "?access_token=" + token + "&refresh_token=" + refresh;
+                    }
+                }
+            } catch (e) {
+                console.error("CORS block or error accessing parent window hash:", e);
+            }
+            </script>
+            """,
+            height=0,
+            width=0
+        )
+
         st.markdown("""
-        <div style="text-align: center; padding: 20px;">
-            <h1 style="color: #1e88e5;">⚡ BINARY PRO SCANNER V3</h1>
-            <h3 style="color: #94a3b8; font-weight: 400;">VIP Trading Access Portal</h3>
+        <div style="text-align: center; padding: 30px 0 10px 0;">
+            <h1 style="color: #1e88e5; font-size: 2.2rem; font-weight: 800; letter-spacing: -0.025em; text-shadow: 0 0 20px rgba(30,136,229,0.3);">⚡ BINARY PRO SCANNER V3</h1>
+            <p style="color: #94a3b8; font-size: 1.1rem; margin-top: 5px;">VIP Trading Access Portal</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -274,34 +310,57 @@ if supabase_client is not None:
         if "login_email" not in st.session_state:
             st.session_state.login_email = ""
             
-        col_auth_l, col_auth_mid, col_auth_r = st.columns([1, 2, 1])
+        col_auth_l, col_auth_mid, col_auth_r = st.columns([1, 1.8, 1])
         with col_auth_mid:
-            st.markdown("<div style='background-color:#111827; padding:25px; border-radius:12px; border:1px solid #1e293b; color:#e0e6ed;'>", unsafe_allow_html=True)
+            # Glassmorphic Login Card
+            st.markdown("""
+            <div style='background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%); 
+                        padding: 35px; 
+                        border-radius: 16px; 
+                        border: 1px solid rgba(255, 255, 255, 0.08); 
+                        box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.5);
+                        color: #f1f5f9;
+                        backdrop-filter: blur(12px);
+                        margin-bottom: 20px;'>
+            """, unsafe_allow_html=True)
+            
             if not st.session_state.otp_sent:
-                email_input = st.text_input("Enter Email to Login:", placeholder="trader@example.com")
-                if st.button("📩 Send Code via Email", use_container_width=True):
+                st.markdown("<h3 style='margin-top:0; font-size:1.3rem; font-weight:600; color:#ffffff;'>🔑 Secure Login</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size:0.85rem; color:#94a3b8; margin-bottom:20px;'>Enter your email to receive a secure login link and verification code.</p>", unsafe_allow_html=True)
+                
+                email_input = st.text_input("Email Address", placeholder="trader@example.com")
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                if st.button("📩 Send Login Link", use_container_width=True):
                     if email_input:
                         try:
                             # Request Supabase OTP
                             res = supabase_client.auth.sign_in_with_otp({"email": email_input})
                             st.session_state.login_email = email_input
                             st.session_state.otp_sent = True
-                            st.success(f"Verification code sent! Please check {email_input}.")
+                            st.success(f"Login link sent! Please check your email inbox and spam folder.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to send code: {e}")
+                            st.error(f"Failed to send link: {e}")
                     else:
                         st.warning("Please enter a valid email address.")
             else:
-                st.info(f"Verification code sent to **{st.session_state.login_email}**")
-                otp_code = st.text_input("Enter 6-digit Code:", placeholder="123456")
+                st.markdown("<h3 style='margin-top:0; font-size:1.3rem; font-weight:600; color:#ffffff;'>📩 Check Your Email</h3>", unsafe_allow_html=True)
+                st.markdown(f"<p style='font-size:0.85rem; color:#94a3b8;'>We sent a magic login link to <b>{st.session_state.login_email}</b>.</p>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size:0.85rem; color:#94a3b8; margin-bottom: 20px;'>You can click the link in your email to log in automatically, or enter the 6-digit code below:</p>", unsafe_allow_html=True)
+                
+                otp_code = st.text_input("6-Digit Code", placeholder="123456")
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
                 col_b1, col_b2 = st.columns(2)
                 with col_b1:
                     if st.button("⬅️ Change Email", use_container_width=True):
                         st.session_state.otp_sent = False
                         st.rerun()
                 with col_b2:
-                    if st.button("✅ Verify & Log In", use_container_width=True):
+                    if st.button("✅ Verify & Enter", use_container_width=True):
                         if otp_code:
                             try:
                                 res = supabase_client.auth.verify_otp({
@@ -318,8 +377,7 @@ if supabase_client is not None:
                             except Exception as e:
                                 st.error(f"Error verifying code: {e}")
                         else:
-                            st.warning("Please enter code.")
-            st.markdown("</div>", unsafe_allow_html=True)
+                            st.warning("Please enter the code.")
             
             # Show SQL editor copy-paste SQL details for setup help
             st.markdown("<br><br>", unsafe_allow_html=True)
