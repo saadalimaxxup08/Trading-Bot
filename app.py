@@ -298,86 +298,90 @@ if supabase_client is not None:
             width=0
         )
 
+        # Inject Premium Glowing Style Sheet for Login Portal
         st.markdown("""
-        <div style="text-align: center; padding: 30px 0 10px 0;">
-            <h1 style="color: #1e88e5; font-size: 2.2rem; font-weight: 800; letter-spacing: -0.025em; text-shadow: 0 0 20px rgba(30,136,229,0.3);">⚡ BINARY PRO SCANNER V3</h1>
-            <p style="color: #94a3b8; font-size: 1.1rem; margin-top: 5px;">VIP Trading Access Portal</p>
-        </div>
+        <style>
+            /* Override background for login screen specifically */
+            div[data-testid="stAppViewContainer"] {
+                background: radial-gradient(circle at 50% 30%, #1a103c 0%, #030712 70%) !important;
+            }
+            .login-container {
+                max-width: 480px;
+                margin: 60px auto;
+                background: rgba(17, 24, 39, 0.7);
+                border: 1px solid rgba(99, 102, 241, 0.25);
+                border-radius: 20px;
+                padding: 40px;
+                text-align: center;
+                box-shadow: 0 0 45px rgba(99, 102, 241, 0.2);
+                backdrop-filter: blur(16px);
+            }
+            .glow-title {
+                font-family: 'Inter', sans-serif;
+                font-size: 2.2rem;
+                font-weight: 800;
+                background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                text-shadow: 0 0 30px rgba(99,102,241,0.25);
+            }
+            .glow-btn button {
+                background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+                border: none !important;
+                box-shadow: 0 4px 15px rgba(99,102,241,0.4) !important;
+                transition: all 0.3s ease !important;
+                color: white !important;
+                font-weight: bold !important;
+            }
+            .glow-btn button:hover {
+                box-shadow: 0 6px 20px rgba(99,102,241,0.6) !important;
+                transform: translateY(-2px) !important;
+            }
+        </style>
         """, unsafe_allow_html=True)
-        
+
         if "otp_sent" not in st.session_state:
             st.session_state.otp_sent = False
         if "login_email" not in st.session_state:
             st.session_state.login_email = ""
-            
-        col_auth_l, col_auth_mid, col_auth_r = st.columns([1, 1.8, 1])
+
+        col_auth_l, col_auth_mid, col_auth_r = st.columns([1, 2, 1])
         with col_auth_mid:
-            # Glassmorphic Login Card
-            st.markdown("""
-            <div style='background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%); 
-                        padding: 35px; 
-                        border-radius: 16px; 
-                        border: 1px solid rgba(255, 255, 255, 0.08); 
-                        box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.5);
-                        color: #f1f5f9;
-                        backdrop-filter: blur(12px);
-                        margin-bottom: 20px;'>
-            """, unsafe_allow_html=True)
-            
+            # Login Form container
+            st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+            st.markdown("<div class='glow-title'>⚡ BINARY PRO</div>", unsafe_allow_html=True)
+            st.markdown("<div style='color:#a1a1aa; font-size:0.95rem; margin-bottom:30px;'>VIP Trading Access Portal</div>", unsafe_allow_html=True)
+
             if not st.session_state.otp_sent:
-                st.markdown("<h3 style='margin-top:0; font-size:1.3rem; font-weight:600; color:#ffffff;'>🔑 Secure Login</h3>", unsafe_allow_html=True)
-                st.markdown("<p style='font-size:0.85rem; color:#94a3b8; margin-bottom:20px;'>Enter your email to receive a secure login link and verification code.</p>", unsafe_allow_html=True)
-                
-                email_input = st.text_input("Email Address", placeholder="trader@example.com")
-                st.markdown("</div>", unsafe_allow_html=True)
+                email_input = st.text_input("Enter Email to Login", placeholder="trader@example.com")
+                st.markdown("</div>", unsafe_allow_html=True) # close container for positioning input correctly
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                if st.button("📩 Send Login Link", use_container_width=True):
+                st.markdown("<div class='glow-btn'>", unsafe_allow_html=True)
+                if st.button("📩 Send Magic Link", use_container_width=True):
                     if email_input:
                         try:
-                            # Request Supabase OTP
+                            # Request Supabase OTP (triggers Magic Link email)
                             res = supabase_client.auth.sign_in_with_otp({"email": email_input})
                             st.session_state.login_email = email_input
                             st.session_state.otp_sent = True
-                            st.success(f"Login link sent! Please check your email inbox and spam folder.")
+                            st.success(f"Link sent successfully!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Failed to send link: {e}")
                     else:
                         st.warning("Please enter a valid email address.")
+                st.markdown("</div>", unsafe_allow_html=True)
             else:
-                st.markdown("<h3 style='margin-top:0; font-size:1.3rem; font-weight:600; color:#ffffff;'>📩 Check Your Email</h3>", unsafe_allow_html=True)
-                st.markdown(f"<p style='font-size:0.85rem; color:#94a3b8;'>We sent a magic login link to <b>{st.session_state.login_email}</b>.</p>", unsafe_allow_html=True)
-                st.markdown("<p style='font-size:0.85rem; color:#94a3b8; margin-bottom: 20px;'>You can click the link in your email to log in automatically, or enter the 6-digit code below:</p>", unsafe_allow_html=True)
-                
-                otp_code = st.text_input("6-Digit Code", placeholder="123456")
+                st.markdown("<h3 style='color:#ffffff; font-size:1.3rem; font-weight:700;'>🔮 Link Dispatched!</h3>", unsafe_allow_html=True)
+                st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link has been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
+                st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>Click the link in the email to automatically unlock this terminal!</p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                col_b1, col_b2 = st.columns(2)
-                with col_b1:
-                    if st.button("⬅️ Change Email", use_container_width=True):
-                        st.session_state.otp_sent = False
-                        st.rerun()
-                with col_b2:
-                    if st.button("✅ Verify & Enter", use_container_width=True):
-                        if otp_code:
-                            try:
-                                res = supabase_client.auth.verify_otp({
-                                    "email": st.session_state.login_email,
-                                    "token": otp_code,
-                                    "type": "magiclink"
-                                })
-                                if res.user:
-                                    st.session_state.supabase_user = res.user
-                                    st.success("Access Granted!")
-                                    st.rerun()
-                                else:
-                                    st.error("Verification failed. Invalid code.")
-                            except Exception as e:
-                                st.error(f"Error verifying code: {e}")
-                        else:
-                            st.warning("Please enter the code.")
+                if st.button("⬅️ Back / Change Email", use_container_width=True):
+                    st.session_state.otp_sent = False
+                    st.rerun()
             
             # Show SQL editor copy-paste SQL details for setup help
             st.markdown("<br><br>", unsafe_allow_html=True)
