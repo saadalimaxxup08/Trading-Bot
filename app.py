@@ -374,14 +374,37 @@ if supabase_client is not None:
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<h3 style='color:#ffffff; font-size:1.3rem; font-weight:700;'>🔮 Link Dispatched!</h3>", unsafe_allow_html=True)
-                st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link has been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
-                st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>Click the link in the email to automatically unlock this terminal!</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link and verification code have been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
+                st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>You can click the link in your email to log in, or enter the 6-digit verification code below:</p>", unsafe_allow_html=True)
+                
+                otp_code = st.text_input("6-Digit Code", placeholder="123456")
                 st.markdown("</div>", unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                if st.button("⬅️ Back / Change Email", use_container_width=True):
-                    st.session_state.otp_sent = False
-                    st.rerun()
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    if st.button("⬅️ Change Email", use_container_width=True):
+                        st.session_state.otp_sent = False
+                        st.rerun()
+                with col_b2:
+                    if st.button("✅ Verify & Enter", use_container_width=True):
+                        if otp_code:
+                            try:
+                                res = supabase_client.auth.verify_otp({
+                                    "email": st.session_state.login_email,
+                                    "token": otp_code,
+                                    "type": "magiclink"
+                                })
+                                if res.user:
+                                    st.session_state.supabase_user = res.user
+                                    st.success("Access Granted!")
+                                    st.rerun()
+                                else:
+                                    st.error("Verification failed. Invalid code.")
+                            except Exception as e:
+                                st.error(f"Error verifying code: {e}")
+                        else:
+                            st.warning("Please enter the code.")
             
             # Show SQL editor copy-paste SQL details for setup help
             st.markdown("<br><br>", unsafe_allow_html=True)
