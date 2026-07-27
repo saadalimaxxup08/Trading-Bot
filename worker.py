@@ -25,8 +25,8 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", 
-    "EURGBP=X", "GBPJPY=X", "GC=F", "CL=F", "BTC-USD", "ETH-USD", "SOL-USD"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCHF=X", 
+    "EURGBP=X", "GBPJPY=X", "GC=F", "CL=F", "ETH-USD", "SOL-USD"
 ]
 
 # Scaled volatility thresholds lookup - Matches app.py
@@ -35,13 +35,11 @@ ATR_THRESHOLDS = {
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
     "AUDUSD=X": 0.00005,
-    "USDCAD=X": 0.00005,
     "USDCHF=X": 0.00005,
     "EURGBP=X": 0.00005,
     "GBPJPY=X": 0.01,
     "GC=F": 0.2,       # Gold Futures
     "CL=F": 0.1,       # Crude Oil
-    "BTC-USD": 20.0,
     "ETH-USD": 1.0,
     "SOL-USD": 0.1     # Solana
 }
@@ -338,6 +336,9 @@ def check_signals(df):
                 c_score += 1
             if rsi_room_call[idx]:
                 c_score += 1
+            # Bullish Marubozu weighting
+            if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] > df.loc[idx, 'Open']:
+                c_score += 1
                 
         # PUT SCORE
         if put_safe[idx] and (macd_down_cross[idx] or bb_put_trigger[idx]):
@@ -347,6 +348,9 @@ def check_signals(df):
             if vol_increasing[idx]:
                 p_score += 1
             if rsi_room_put[idx]:
+                p_score += 1
+            # Bearish Marubozu weighting
+            if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] < df.loc[idx, 'Open']:
                 p_score += 1
                 
         call_scores.append(c_score)
@@ -478,9 +482,11 @@ def process_market_signals(pair, timeframe):
             exit_time = closed_candle_time + delta_t
             
             pattern = closed_candle['Pattern_Label']
+            # Skip low-winrate patterns (Doji, Shooting Star, 3 Crows)
+            if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
+                return
+                
             strength = "NORMAL"
-            
-            # Simple strength logic matching app.py
             if pattern:
                 strength = "STRONG"
                 
@@ -591,8 +597,11 @@ def process_market_signals_prefetched(pair, timeframe, df):
             exit_time = closed_candle_time + delta_t
             
             pattern = closed_candle['Pattern_Label']
+            # Skip low-winrate patterns (Doji, Shooting Star, 3 Crows)
+            if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
+                return
+                
             strength = "NORMAL"
-            
             if pattern:
                 strength = "STRONG"
                 

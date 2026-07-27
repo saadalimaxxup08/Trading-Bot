@@ -155,7 +155,7 @@ except Exception:
 
 # Initialize persistent session states
 if "selected_pair" not in st.session_state:
-    st.session_state.selected_pair = "BTC-USD"
+    st.session_state.selected_pair = "SOL-USD"
 if "scanning" not in st.session_state:
     st.session_state.scanning = True
 if "signal_history" not in st.session_state:
@@ -661,8 +661,8 @@ else:
 
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", 
-    "EURGBP=X", "GBPJPY=X", "GC=F", "CL=F", "BTC-USD", "ETH-USD", "SOL-USD"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCHF=X", 
+    "EURGBP=X", "GBPJPY=X", "GC=F", "CL=F", "ETH-USD", "SOL-USD"
 ]
 
 # Scaled volatility thresholds lookup
@@ -671,13 +671,11 @@ ATR_THRESHOLDS = {
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
     "AUDUSD=X": 0.00005,
-    "USDCAD=X": 0.00005,
     "USDCHF=X": 0.00005,
     "EURGBP=X": 0.00005,
     "GBPJPY=X": 0.01,
     "GC=F": 0.2,       # Gold Futures
     "CL=F": 0.1,       # Crude Oil
-    "BTC-USD": 20.0,
     "ETH-USD": 1.0,
     "SOL-USD": 0.1     # Solana
 }
