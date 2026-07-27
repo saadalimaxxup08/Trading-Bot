@@ -1671,7 +1671,12 @@ if radar_data:
         trend_text = "🟢 BULLISH" if pair_info["trend"] == "UP" else ("🔴 BEARISH" if pair_info["trend"] == "DOWN" else "⚪ NEUTRAL")
         status_bg = "#15803d" if pair_info["status"] == "TRADE NOW" else "#374151"
         
-        card_html = f'<a href="/?pair={pair_ticker}" target="_self" style="text-decoration: none; color: inherit; display: inline-block;">'
+        rt_val = st.query_params.get("rt", "")
+        link = f"/?pair={pair_ticker}"
+        if rt_val:
+            link += f"&rt={rt_val}"
+            
+        card_html = f'<a href="{link}" target="_self" style="text-decoration: none; color: inherit; display: inline-block;">'
         card_html += f'<div style="background-color: {bg_color}; border: 2px solid {border_color}; padding: 12px; border-radius: 8px; min-width: 140px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2); {shadow} transition: transform 0.2s;">'
         card_html += f'<div style="font-weight: bold; font-size: 0.85rem; color: #f8fafc; margin-bottom: 4px;">{pair_name}</div>'
         card_html += f'<div style="font-size: 0.75rem; font-weight: bold; margin-bottom: 8px;">{trend_text}</div>'
