@@ -78,6 +78,85 @@ def send_telegram_alert(text):
     except Exception as e:
         print(f"Failed to send Telegram alert: {e}")
 
+def send_daily_summary():
+    if supabase_client is None:
+        return
+    try:
+        import datetime
+        import pytz
+        import pandas as pd
+        
+        tz_ry = pytz.timezone("Asia/Riyadh")
+        now_ry = datetime.datetime.now(tz_ry)
+        start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
+        start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
+        
+        res = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).order("time", desc=True).execute()
+        signals = res.data if res.data else []
+        
+        date_str = now_ry.strftime("%Y-%m-%d")
+        
+        # Calculate Stats
+        stats = {}
+        total_wins = 0
+        total_losses = 0
+        for tf in ["1m", "5m", "15m"]:
+            tf_sigs = [s for s in signals if s["timeframe"] == tf]
+            wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
+            losses = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+            ties = sum(1 for s in tf_sigs if s["status"] == "TIE")
+            total_wl = wins + losses
+            winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
+            stats[tf] = {
+                "total": len(tf_sigs),
+                "wins": wins,
+                "losses": losses,
+                "winrate": winrate
+            }
+            total_wins += wins
+            total_losses += losses
+            
+        overall_wl = total_wins + total_losses
+        overall_winrate = (total_wins / overall_wl) * 100 if overall_wl > 0 else 0.0
+        
+        msg = f"📊 <b>DAILY TRADING SUMMARY</b>\n"
+        msg += f"📅 <b>Date:</b> <code>{date_str}</code> (Jeddah Time)\n\n"
+        
+        msg += f"🎯 <b>OVERALL ACCURACY:</b> <b>{overall_winrate:.1f}%</b> ({total_wins}W - {total_losses}L)\n\n"
+        
+        msg += f"⏱️ <b>PERFORMANCE BY TIMEFRAME:</b>\n"
+        for tf in ["1m", "5m", "15m"]:
+            tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
+            msg += f"• <b>{tf_display}:</b> {stats[tf]['wins']}W - {stats[tf]['losses']}L ({stats[tf]['winrate']:.1f}% Accuracy)\n"
+            
+        msg += f"\n📋 <b>TODAY'S SIGNALS LOG (Latest 20):</b>\n"
+        if signals:
+            for sig in signals[:20]:
+                sig_time_utc = pd.to_datetime(sig["time"])
+                if sig_time_utc.tzinfo is None:
+                    sig_time_utc = pytz.utc.localize(sig_time_utc)
+                sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                time_str = sig_time_ry.strftime("%I:%M %p")
+                
+                pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                
+                status_emoji = "⏳"
+                if sig["status"] == "WIN":
+                    status_emoji = "🟢 WIN"
+                elif sig["status"] == "LOSS":
+                    status_emoji = "🔴 LOSS"
+                elif sig["status"] == "TIE":
+                    status_emoji = "⚪ TIE"
+                    
+                msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> ({sig['timeframe']}) | {status_emoji}\n"
+        else:
+            msg += "<i>No signals generated today.</i>"
+            
+        send_telegram_alert(msg)
+        print(f"[SUMMARY] Daily summary successfully sent at 9:00 PM AST.")
+    except Exception as e:
+        print(f"Error generating daily summary: {e}")
+
 # ----------------- TECHNICAL INDICATORS -----------------
 def calculate_atr(df, period=14):
     high = df['High']
@@ -382,13 +461,13 @@ def process_market_signals(pair, timeframe):
             
             success = save_signal_to_db(new_sig)
             if success:
-                # Convert closed_candle_time to Pakistan timezone (Asia/Karachi)
-                pkt_tz = pytz.timezone("Asia/Karachi")
+                # Convert closed_candle_time to Riyadh/Jeddah timezone (Asia/Riyadh)
+                pkt_tz = pytz.timezone("Asia/Riyadh")
                 if closed_candle_time.tzinfo is not None:
                     closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
                 else:
                     closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
-                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p PKT")
+                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
                 
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {alert_time_str}")
                 

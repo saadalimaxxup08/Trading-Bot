@@ -200,6 +200,8 @@ def start_background_scanner():
     
     def scanner_thread_func():
         print("[START] 24/7 Cloud Background Scanner Active")
+        import datetime
+        last_summary_date = None
         while True:
             try:
                 # Reload environment variables in case they were updated via UI/save
@@ -219,6 +221,14 @@ def start_background_scanner():
                         time.sleep(1.5)
                 
                 worker.resolve_pending_signals()
+                
+                # Check if it is 9:00 PM AST in Saudi Arabia to send the daily report
+                tz_ry = pytz.timezone("Asia/Riyadh")
+                now_ry = datetime.datetime.now(tz_ry)
+                if now_ry.hour == 21 and now_ry.minute == 0 and last_summary_date != now_ry.strftime("%Y-%m-%d"):
+                    worker.send_daily_summary()
+                    last_summary_date = now_ry.strftime("%Y-%m-%d")
+                
                 time.sleep(30)
             except Exception as e:
                 print(f"Background scanner loop error: {e}")
@@ -727,7 +737,7 @@ def check_news_block(pair):
                     active_news_events.append({
                         "title": event.get("title"),
                         "country": event.get("country"),
-                        "time": event_time.astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p PKT")
+                        "time": event_time.astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p AST")
                     })
             except Exception:
                 continue
@@ -738,7 +748,7 @@ def check_session_filter(enabled=True):
     if not enabled:
         return True, ""
     
-    pkt = pytz.timezone('Asia/Karachi')
+    pkt = pytz.timezone('Asia/Riyadh')
     now_pkt = datetime.datetime.now(pkt)
     current_time = now_pkt.time()
     
@@ -746,9 +756,9 @@ def check_session_filter(enabled=True):
     end_time = datetime.time(23, 0)
     
     in_session = start_time <= current_time <= end_time
-    time_str = now_pkt.strftime("%I:%M %p PKT")
+    time_str = now_pkt.strftime("%I:%M %p AST")
     
-    return in_session, f"Current PKT: {time_str} (Bot scans only: 12:00 PM - 11:00 PM PKT)"
+    return in_session, f"Current AST: {time_str} (Bot scans only: 12:00 PM - 11:00 PM AST)"
 
 # ----------------- TECHNICAL INDICATORS MODULE -----------------
 def calculate_atr(df, period=14):
@@ -1764,7 +1774,7 @@ with col_right:
                     else:
                         badge_status = "<span class='badge badge-pending' style='font-size:0.7rem;'>PENDING</span>"
                         
-                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p")
+                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
                     
                     html_right_table += f"""
                         <tr style="border-bottom: 1px solid #374151;">
@@ -1826,7 +1836,7 @@ with col_right:
                 
                 html_stats_table = """
                 <h5 style="margin: 0 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;">⏱️ STATS BY TIMEFRAME</h5>
-                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.75rem; margin-bottom: 20px;">
+                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.75rem; margin-bottom: 15px;">
                     <thead>
                         <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
                             <th style="padding: 6px 8px;">TF</th>
@@ -1850,6 +1860,40 @@ with col_right:
                     """
                 html_stats_table += "</tbody></table>"
                 st.markdown(html_stats_table, unsafe_allow_html=True)
+                
+                # Visual block grid for each timeframe (like calendar blocks)
+                st.markdown("<h5 style='margin: 15px 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;'>📊 VISUAL TRADES FEED</h5>", unsafe_allow_html=True)
+                
+                for tf in ["1m", "5m", "15m"]:
+                    tf_signals = [s for s in all_signals if s["timeframe"] == tf][:8] # Show latest 8 trades in a compact grid
+                    tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
+                    
+                    st.markdown(f"<div style='font-size:0.75rem; font-weight:bold; color:#94a3b8; margin-top:5px;'>⏱️ {tf_display} Feed</div>", unsafe_allow_html=True)
+                    if tf_signals:
+                        html_blocks = '<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; margin-bottom: 15px;">'
+                        for sig in tf_signals:
+                            bg, border, text, status = "#37474f", "#455a64", "#cfd8dc", "TIE"
+                            if sig["status"] == "WIN":
+                                bg, border, text, status = "#1b5e20", "#2e7d32", "#a5d6a7", "WIN"
+                            elif sig["status"] == "LOSS":
+                                bg, border, text, status = "#b71c1c", "#c62828", "#ef9a9a", "LOSS"
+                            elif sig["status"] == "PENDING":
+                                bg, border, text, status = "#e65100", "#f57c00", "#ffe0b2", "PEND"
+                                
+                            time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
+                            pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                            
+                            html_blocks += f"""
+                            <div style="background-color: {bg}; color: {text}; border: 1px solid {border}; padding: 6px 8px; border-radius: 6px; font-size: 0.65rem; text-align: center; width: 23%; min-width: 65px; box-sizing: border-box; box-shadow: 0 2px 4px rgba(0,0,0,0.15);">
+                                <div style="font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{pair_clean}</div>
+                                <div style="font-size: 0.55rem; opacity: 0.85;">{time_str}</div>
+                                <div style="font-weight: bold; font-size: 0.6rem; margin-top: 2px;">{status}</div>
+                            </div>
+                            """
+                        html_blocks += "</div>"
+                        st.markdown(html_blocks, unsafe_allow_html=True)
+                    else:
+                        st.markdown("<div style='font-size:0.7rem; color:#64748b; margin-bottom:15px;'>No signals for this timeframe yet.</div>", unsafe_allow_html=True)
                 
                 # 2. LATEST 10 GLOBAL SIGNALS FEED
                 html_global_table = """
@@ -1878,7 +1922,7 @@ with col_right:
                     else:
                         badge_status = "<span class='badge badge-pending' style='font-size:0.6rem; padding: 2px 6px;'>PEND</span>"
                     
-                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p")
+                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
                     pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
                     
                     html_global_table += f"""
