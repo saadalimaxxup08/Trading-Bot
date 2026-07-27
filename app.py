@@ -1645,66 +1645,50 @@ if st.sidebar.button("🚪 Log Out", use_container_width=True):
     st.query_params.pop("rt", None)
     st.rerun()
 
-# ----------------- THREE COLUMN LAYOUT ASSEMBLY -----------------
-col_left, col_center, col_right = st.columns([3, 6, 3])
+# Parse query parameters for active pair selection
+if "pair" in st.query_params:
+    st.session_state.selected_pair = st.query_params["pair"]
 
-# LEFT COLUMN - MARKET RADAR DASHBOARD
-with col_left:
-    st.markdown("## 📡 MARKET RADAR")
-    st.caption("Auto 15m Trend & ATR Volatility Scanner")
-    
-    with st.spinner("Refreshing Radar Dashboard..."):
-        radar_data = calculate_radar_data()
+# ----------------- HORIZONTAL MARKET RADAR ASSEMBLY -----------------
+st.markdown("## 📡 MARKET RADAR")
+st.caption("Auto 15m Trend & ATR Volatility Scanner (Landscape Scroll)")
+
+radar_data = calculate_radar_data()
+if radar_data:
+    # Build a horizontal swipe/scroll layout using custom CSS & HTML
+    html_radar = """
+    <div style="display: flex; overflow-x: auto; gap: 12px; padding: 10px 5px; margin-bottom: 25px; scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
+    """
+    for pair_ticker in RADAR_PAIRS:
+        pair_name = pair_ticker.replace("=X", "").replace("-USD", "/USD")
+        pair_info = radar_data.get(pair_ticker, {"trend": "NEUTRAL", "status": "WAIT"})
         
-    if radar_data:
-        # Wrap in scrollable container to prevent vertical stretching and keep columns aligned
-        with st.container(height=450):
-            # Build Table manually with streamlit columns
-            st.markdown("""
-            <div style="font-weight:bold; background-color:#1f2937; padding:8px; border-radius:4px; display:flex; justify-content:space-between; margin-bottom:5px; border-bottom: 2px solid #374151;">
-                <div style="width:28%;">Pair</div>
-                <div style="width:28%;">15m Trend</div>
-                <div style="width:28%;">Status</div>
-                <div style="width:16%;">Action</div>
+        # Determine highlighting based on selection
+        is_selected = pair_ticker == st.session_state.selected_pair
+        border_color = "#3b82f6" if is_selected else "#374151"
+        bg_color = "rgba(59, 130, 246, 0.15)" if is_selected else "#111827"
+        shadow = "box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);" if is_selected else ""
+        
+        # Badges
+        trend_text = "🟢 BULLISH" if pair_info["trend"] == "UP" else ("🔴 BEARISH" if pair_info["trend"] == "DOWN" else "⚪ NEUTRAL")
+        status_bg = "#15803d" if pair_info["status"] == "TRADE NOW" else "#374151"
+        
+        html_radar += f"""
+        <a href="/?pair={pair_ticker}" target="_self" style="text-decoration: none; color: inherit; display: inline-block;">
+            <div style="background-color: {bg_color}; border: 2px solid {border_color}; padding: 12px; border-radius: 8px; min-width: 140px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2); {shadow} transition: transform 0.2s;">
+                <div style="font-weight: bold; font-size: 0.85rem; color: #f8fafc; margin-bottom: 4px;">{pair_name}</div>
+                <div style="font-size: 0.75rem; font-weight: bold; margin-bottom: 8px;">{trend_text}</div>
+                <div style="background-color: {status_bg}; color: #ffffff; font-size: 0.65rem; font-weight: bold; padding: 3px 8px; border-radius: 4px; display: inline-block;">{pair_info["status"]}</div>
             </div>
-            """, unsafe_allow_html=True)
-            
-            for pair_ticker in RADAR_PAIRS:
-                pair_name = pair_ticker.replace("=X", "").replace("-USD", "/USD")
-                pair_info = radar_data.get(pair_ticker, {"trend": "NEUTRAL", "status": "WAIT"})
-                
-                trend_badge = ""
-                if pair_info["trend"] == "UP":
-                    trend_badge = "<span class='badge badge-trend-up'>🟢 BULLISH</span>"
-                elif pair_info["trend"] == "DOWN":
-                    trend_badge = "<span class='badge badge-trend-down'>🔴 BEARISH</span>"
-                else:
-                    trend_badge = "<span class='badge badge-trend-neutral'>⚪ NEUTRAL</span>"
-                    
-                status_badge = ""
-                if pair_info["status"] == "TRADE NOW":
-                    status_badge = "<span class='badge badge-trade'>TRADE NOW</span>"
-                else:
-                    status_badge = "<span class='badge badge-wait'>WAIT</span>"
-                
-                # Row Container
-                row_col = st.columns([2.5, 2.5, 2.5, 1.5])
-                
-                # Highlight Selected Pair
-                if pair_ticker == st.session_state.selected_pair:
-                    row_col[0].markdown(f"**⚡ {pair_name}**")
-                else:
-                    row_col[0].markdown(f"{pair_name}")
-                    
-                row_col[1].markdown(trend_badge, unsafe_allow_html=True)
-                row_col[2].markdown(status_badge, unsafe_allow_html=True)
-                
-                # Trigger Selection
-                if row_col[3].button("👁️", key=f"btn_radar_{pair_ticker}", help=f"Show {pair_name} Chart"):
-                    st.session_state.selected_pair = pair_ticker
-                    st.rerun()
-    else:
-        st.error("Failed to load Market Radar batch data.")
+        </a>
+        """
+    html_radar += "</div>"
+    st.markdown(html_radar, unsafe_allow_html=True)
+else:
+    st.error("Failed to load Market Radar batch data.")
+
+# ----------------- TWO COLUMN LAYOUT ASSEMBLY -----------------
+col_center, col_right = st.columns([8, 4])
 
 # CENTER COLUMN - LIVE STATION CHART & BACKTESTER
 with col_center:
@@ -1757,106 +1741,62 @@ with col_center:
                     
                 # Signal Scanning: Signals are processed centrally by the background worker.
                 
-                # Render Multi-plot Plotly Chart
-                fig = make_subplots(
-                    rows=4, cols=1,
-                    shared_xaxes=True,
-                    vertical_spacing=0.03,
-                    row_heights=[0.55, 0.15, 0.15, 0.15]
-                )
+                # ----------------- TRADINGVIEW WIDGET RENDER -----------------
+                import streamlit.components.v1 as components
                 
-                # Candlesticks
-                fig.add_trace(
-                    go.Candlestick(
-                        x=df_live.index,
-                        open=df_live['Open'],
-                        high=df_live['High'],
-                        low=df_live['Low'],
-                        close=df_live['Close'],
-                        name="Price"
-                    ),
-                    row=1, col=1
-                )
+                # Map active_pair to TradingView ticker
+                tv_mapping = {
+                    "EURUSD=X": "FX:EURUSD",
+                    "GBPUSD=X": "FX:GBPUSD",
+                    "USDJPY=X": "FX:USDJPY",
+                    "AUDUSD=X": "FX:AUDUSD",
+                    "USDCAD=X": "FX:USDCAD",
+                    "USDCHF=X": "FX:USDCHF",
+                    "EURGBP=X": "FX:EURGBP",
+                    "GBPJPY=X": "FX:GBPJPY",
+                    "BTC-USD": "BINANCE:BTCUSDT",
+                    "ETH-USD": "BINANCE:ETHUSDT",
+                    "SOL-USD": "BINANCE:SOLUSDT",
+                    "GC=F": "OANDA:XAUUSD",
+                    "CL=F": "NYMEX:CL1!"
+                }
+                tv_symbol = tv_mapping.get(active_pair, active_pair)
+                tv_interval = "1" if timeframe == "1m" else ("5" if timeframe == "5m" else "15")
                 
-                if show_emas:
-                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['EMA_50'], line=dict(color='#ff9800', width=1.5), name="EMA 50"), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['EMA_200'], line=dict(color='#9c27b0', width=2.0), name="EMA 200"), row=1, col=1)
+                html_tv = f"""
+                <div class="tradingview-widget-container" style="height:500px; width:100%;">
+                  <div id="tradingview_chart" style="height:470px; width:100%;"></div>
+                  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                  <script type="text/javascript">
+                  new TradingView.widget({{
+                    "width": "100%",
+                    "height": 470,
+                    "symbol": "{tv_symbol}",
+                    "interval": "{tv_interval}",
+                    "timezone": "Asia/Riyadh",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "en",
+                    "toolbar_bg": "#f1f3f6",
+                    "enable_publishing": false,
+                    "hide_side_toolbar": false,
+                    "allow_symbol_change": false,
+                    "save_image": false,
+                    "container_id": "tradingview_chart",
+                    "studies": [
+                      "MASimple@tv-basicstudies",
+                      "RSI@tv-basicstudies",
+                      "MACD@tv-basicstudies"
+                    ]
+                  }});
+                  </script>
+                </div>
+                """
+                components.html(html_tv, height=500)
                 
-                if show_bb:
-                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['BB_Upper'], line=dict(color='#1e88e5', width=1, dash='dash'), name="BB Upper"), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['BB_Lower'], line=dict(color='#1e88e5', width=1, dash='dash'), name="BB Lower"), row=1, col=1)
-                
-                if show_sr:
-                    sup_val = df_live['Support'].iloc[-1]
-                    res_val = df_live['Resistance'].iloc[-1]
-                    fig.add_hline(y=sup_val, line=dict(color='#00e676', width=1, dash='dot'), annotation_text=f"Support: {sup_val:.5f}", row=1, col=1)
-                    fig.add_hline(y=res_val, line=dict(color='#ff1744', width=1, dash='dot'), annotation_text=f"Resistance: {res_val:.5f}", row=1, col=1)
-                
-                # Historical arrows overlay
-                for sig in st.session_state.signal_history:
-                    if sig["pair"] == active_pair and sig["timeframe"] == timeframe:
-                        sig_time = sig["time"]
-                        if sig_time in df_live.index:
-                            price_pt = sig["entry_price"]
-                            if sig["type"] == "CALL":
-                                fig.add_annotation(
-                                    x=sig_time, y=price_pt,
-                                    text="▲ CALL", showarrow=True, arrowhead=1,
-                                    arrowcolor="#00e676", arrowsize=1.5,
-                                    font=dict(color="#00e676", size=12, family="Arial Bold"),
-                                    bgcolor="rgba(11, 30, 20, 0.8)", bordercolor="#00e676", borderwidth=1,
-                                    row=1, col=1
-                                )
-                            else:
-                                fig.add_annotation(
-                                    x=sig_time, y=price_pt,
-                                    text="▼ PUT", showarrow=True, arrowhead=1,
-                                    arrowcolor="#ff1744", arrowsize=1.5,
-                                    font=dict(color="#ff1744", size=12, family="Arial Bold"),
-                                    bgcolor="rgba(30, 11, 11, 0.8)", bordercolor="#ff1744", borderwidth=1,
-                                    row=1, col=1
-                                )
-                
-                # Patterns label Overlay
-                if show_patterns:
-                    pattern_df = df_live[df_live['Pattern_Label'] != ""]
-                    for idx, row in pattern_df.iterrows():
-                        fig.add_annotation(
-                            x=idx, y=row['High'],
-                            text=row['Pattern_Label'],
-                            showarrow=False,
-                            font=dict(color="#facc15", size=9),
-                            yshift=15,
-                            row=1, col=1
-                        )
-                
-                # RSI
-                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['RSI_14'], line=dict(color='#fbc02d', width=1.5), name="RSI"), row=2, col=1)
-                fig.add_hline(y=70, line=dict(color='#ff1744', width=1, dash='dash'), row=2, col=1)
-                fig.add_hline(y=50, line=dict(color='#ffffff', width=0.8, dash='dot'), row=2, col=1)
-                fig.add_hline(y=30, line=dict(color='#00e676', width=1, dash='dash'), row=2, col=1)
-                
-                # MACD
-                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD'], line=dict(color='#29b6f6', width=1.2), name="MACD"), row=3, col=1)
-                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD_Signal'], line=dict(color='#ab47bc', width=1.2), name="Signal"), row=3, col=1)
-                colors_hist = ['#00e676' if val >= 0 else '#ff1744' for val in df_live['MACD_Hist']]
-                fig.add_trace(go.Bar(x=df_live.index, y=df_live['MACD_Hist'], marker_color=colors_hist, name="Hist"), row=3, col=1)
-                
-                # Volume
-                colors_vol = ['#00e676' if close >= open_p else '#ff1744' for close, open_p in zip(df_live['Close'], df_live['Open'])]
-                fig.add_trace(go.Bar(x=df_live.index, y=df_live['Volume'], marker_color=colors_vol, name="Volume"), row=4, col=1)
-                
-                fig.update_layout(
-                    xaxis_rangeslider_visible=False,
-                    height=450,
-                    paper_bgcolor='#0b0e14',
-                    plot_bgcolor='#0e121a',
-                    margin=dict(l=10, r=10, t=10, b=10),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                fig.update_xaxes(gridcolor='#1e293b', zerolinecolor='#1e293b')
-                fig.update_yaxes(gridcolor='#1e293b', zerolinecolor='#1e293b')
-                st.plotly_chart(fig, use_container_width=True)
+                # Autorefresh caption
+                if st.session_state.scanning:
+                    st.caption("🔄 Live TradingView Widget Active (Real-Time)")
                 
                 # Autorefresh caption (sleep/rerun loop handles updates at the end of the script)
                 if st.session_state.scanning:
