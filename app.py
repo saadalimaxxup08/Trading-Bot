@@ -661,7 +661,8 @@ else:
 
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "GC=F"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "AUDUSD=X", "NZDUSD=X",
+    "EURGBP=X", "GBPJPY=X", "EURJPY=X", "GC=F", "ETH-USD", "SOL-USD"
 ]
 
 # Scaled volatility thresholds lookup
@@ -669,7 +670,15 @@ ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
-    "GC=F": 0.2        # Gold Futures
+    "USDCHF=X": 0.00005,
+    "AUDUSD=X": 0.00005,
+    "NZDUSD=X": 0.00005,
+    "EURGBP=X": 0.00005,
+    "GBPJPY=X": 0.01,
+    "EURJPY=X": 0.01,
+    "GC=F": 0.2,       # Gold Futures
+    "ETH-USD": 1.0,
+    "SOL-USD": 0.1     # Solana
 }
 
 # ----------------- NEWS FILTER MODULE -----------------
@@ -1253,7 +1262,15 @@ readable_names = {
     "EURUSD=X": "EUR/USD",
     "GBPUSD=X": "GBP/USD",
     "USDJPY=X": "USD/JPY",
-    "GC=F": "GOLD (GC=F)"
+    "USDCHF=X": "USD/CHF",
+    "AUDUSD=X": "AUD/USD",
+    "NZDUSD=X": "NZD/USD",
+    "EURGBP=X": "EUR/GBP",
+    "GBPJPY=X": "GBP/JPY",
+    "EURJPY=X": "EUR/JPY",
+    "GC=F": "GOLD (GC=F)",
+    "ETH-USD": "ETH/USD",
+    "SOL-USD": "SOL/USD"
 }
 
 # Determine current selectbox index based on session state
