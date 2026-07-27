@@ -270,7 +270,8 @@ if supabase_client is not None:
     if "code" in st.query_params and "email" in st.query_params:
         code = st.query_params["code"]
         email = st.query_params["email"]
-        code_verifier = st._pending_verifiers.get(email)
+        # Extract code_verifier directly from query params or fallback to global dict
+        code_verifier = st.query_params.get("verifier") or st._pending_verifiers.get(email)
         if code_verifier:
             try:
                 res = supabase_client.auth.exchange_code_for_session({
@@ -361,8 +362,8 @@ if supabase_client is not None:
                             digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
                             code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
                             
-                            # Build the dynamic redirect URL containing the email query parameter
-                            redirect_to = f"{APP_URL}?email={email_input}"
+                            # Build the dynamic redirect URL containing the email and verifier query parameters
+                            redirect_to = f"{APP_URL}?email={email_input}&verifier={code_verifier}"
                             
                             # Request Magic Link OTP directly via GoTrue REST API with code challenge
                             headers = {
