@@ -1488,6 +1488,122 @@ if st.sidebar.button("🔔 Send Test Message", use_container_width=True):
     else:
         st.sidebar.warning("Please fill both Token and Chat ID to test.")
 
+# 📊 Report Generator Sidebar Panel
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 REPORT GENERATOR")
+report_type = st.sidebar.selectbox("Report Interval", ["Today's Summary", "Last 1 Hour Summary", "Specific Date Summary"])
+
+target_date = datetime.date.today()
+if report_type == "Specific Date Summary":
+    selected_date = st.sidebar.date_input("Select Date", datetime.date.today())
+    target_date = selected_date
+
+if st.sidebar.button("🔍 Generate Summary", use_container_width=True):
+    if supabase_client is not None:
+        with st.sidebar.spinner("Generating summary..."):
+            tz_ry = pytz.timezone("Asia/Riyadh")
+            if report_type == "Last 1 Hour Summary":
+                start_time_ry = datetime.datetime.now(tz_ry) - datetime.timedelta(hours=1)
+                start_time_utc = start_time_ry.astimezone(pytz.utc).isoformat()
+                res = supabase_client.table("signals").select("*").gte("time", start_time_utc).order("time", desc=True).execute()
+                signals = res.data if res.data else []
+                report_title = f"HOURLY REPORT ({start_time_ry.strftime('%I:%M %p')} - {datetime.datetime.now(tz_ry).strftime('%I:%M %p')})"
+            else:
+                # Today or Specific Date
+                start_dt = tz_ry.localize(datetime.datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0))
+                end_dt = tz_ry.localize(datetime.datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59))
+                start_utc = start_dt.astimezone(pytz.utc).isoformat()
+                end_utc = end_dt.astimezone(pytz.utc).isoformat()
+                res = supabase_client.table("signals").select("*").gte("time", start_utc).lte("time", end_utc).order("time", desc=True).execute()
+                signals = res.data if res.data else []
+                report_title = f"DAILY REPORT ({target_date.strftime('%Y-%m-%d')})"
+                
+            if signals:
+                # Calculate Stats
+                stats = {}
+                total_wins = 0
+                total_losses = 0
+                for tf in ["1m", "5m", "15m"]:
+                    tf_sigs = [s for s in signals if s["timeframe"] == tf]
+                    wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
+                    losses = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+                    total_wl = wins + losses
+                    winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
+                    stats[tf] = {
+                        "wins": wins,
+                        "losses": losses,
+                        "winrate": winrate,
+                        "signals": tf_sigs
+                    }
+                    total_wins += wins
+                    total_losses += losses
+                    
+                overall_wl = total_wins + total_losses
+                overall_winrate = (total_wins / overall_wl) * 100 if overall_wl > 0 else 0.0
+                
+                report_text = f"📊 <b>{report_title}</b>\n"
+                report_text += f"🎯 <b>Overall Accuracy:</b> <b>{overall_winrate:.1f}%</b> ({total_wins}W - {total_losses}L)\n\n"
+                
+                for tf in ["1m", "5m", "15m"]:
+                    tf_disp = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
+                    report_text += f"⏱️ <b>{tf_disp} Trades</b> ({stats[tf]['wins']}W - {stats[tf]['losses']}L | {stats[tf]['winrate']:.1f}%):\n"
+                    if stats[tf]["signals"]:
+                        for sig in stats[tf]["signals"][:15]: # Limit to latest 15 trades per TF to prevent long messages
+                            sig_time_utc = pd.to_datetime(sig["time"])
+                            if sig_time_utc.tzinfo is None:
+                                sig_time_utc = pytz.utc.localize(sig_time_utc)
+                            sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                            time_str = sig_time_ry.strftime("%I:%M %p")
+                            pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                            
+                            status_emoji = "⏳"
+                            if sig["status"] == "WIN":
+                                status_emoji = "🟢 WIN"
+                            elif sig["status"] == "LOSS":
+                                status_emoji = "🔴 LOSS"
+                            elif sig["status"] == "TIE":
+                                status_emoji = "⚪ TIE"
+                            report_text += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji}\n"
+                    else:
+                        report_text += "<i>No trades triggered.</i>\n"
+                    report_text += "\n"
+                
+                st.session_state.custom_report_text = report_text
+                st.session_state.custom_report_title = report_title
+                st.session_state.custom_report_ready = True
+            else:
+                st.sidebar.warning("No signals found for this period.")
+                st.session_state.custom_report_ready = False
+    else:
+        st.sidebar.error("Supabase client is not initialized.")
+
+if "custom_report_ready" in st.session_state and st.session_state.custom_report_ready:
+    st.sidebar.info(f"Report generated: {st.session_state.custom_report_title}")
+    with st.sidebar.expander("👁️ View Report Preview"):
+        st.write(st.session_state.custom_report_text.replace("<b>", "**").replace("</b>", "**").replace("<code>", "`").replace("</code>", "`").replace("<i>", "*").replace("</i>", "*"))
+        
+    if st.sidebar.button("📤 Send Report to Telegram", use_container_width=True):
+        if env_tg_token and env_tg_chat_id:
+            with st.sidebar.spinner("Sending report to Telegram..."):
+                url = f"https://api.telegram.org/bot{env_tg_token}/sendMessage"
+                payload = {
+                    "chat_id": env_tg_chat_id,
+                    "text": st.session_state.custom_report_text,
+                    "parse_mode": "HTML"
+                }
+                try:
+                    resp = requests.post(url, json=payload, timeout=15)
+                    if resp.status_code == 200:
+                        st.sidebar.success("✅ Report sent to Telegram bot!")
+                        st.session_state.custom_report_ready = False
+                    else:
+                        err = resp.json().get("description", resp.text)
+                        st.sidebar.error(f"❌ Telegram Error: {err}")
+                except Exception as e:
+                    st.sidebar.error(f"❌ Failed to send: {e}")
+        else:
+            st.sidebar.warning("Configure Bot Token & Chat ID first.")
+
 # Currency Converter Sidebar
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💱 CURRENCY CONVERTER")
