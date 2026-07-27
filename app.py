@@ -1410,9 +1410,20 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 💼 RISK MANAGER")
 st.sidebar.markdown(f"**Daily Limit:** `Max 3 Loss`")
 st.sidebar.markdown(f"**Losses Today:** `{st.session_state.daily_losses} / 3`")
-if st.sidebar.button("♻️ Reset Losses"):
-    st.session_state.daily_losses = 0
-    st.rerun()
+col_reset_losses, col_clear_db = st.sidebar.columns(2)
+with col_reset_losses:
+    if st.button("♻️ Reset Losses", use_container_width=True):
+        st.session_state.daily_losses = 0
+        st.rerun()
+with col_clear_db:
+    if st.button("🗑️ Clear DB Logs", use_container_width=True, help="Clears historical signals from Supabase database"):
+        if supabase_client is not None:
+            try:
+                supabase_client.table("signals").delete().neq("id", "").execute()
+                st.sidebar.success("Database logs cleared!")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Failed to clear: {e}")
 
 # Telegram Settings Panel
 st.sidebar.markdown("---")
