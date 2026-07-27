@@ -342,74 +342,123 @@ if supabase_client is not None:
             st.markdown("<div class='glow-title'>⚡ BINARY PRO</div>", unsafe_allow_html=True)
             st.markdown("<div style='color:#a1a1aa; font-size:0.95rem; margin-bottom:30px;'>VIP Trading Access Portal</div>", unsafe_allow_html=True)
 
-            if not st.session_state.otp_sent:
-                email_input = st.text_input("Enter Email to Login", placeholder="trader@example.com")
-                st.markdown("</div>", unsafe_allow_html=True)
+            auth_tab1, auth_tab2 = st.tabs(["📩 Magic Link", "🔑 Password"])
+            
+            with auth_tab1:
+                if not st.session_state.otp_sent:
+                    email_input = st.text_input("Enter Email to Login", placeholder="trader@example.com", key="magic_email")
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    st.markdown("<div class='glow-btn'>", unsafe_allow_html=True)
+                    if st.button("📩 Send Magic Link", use_container_width=True, key="btn_send_magic"):
+                        if email_input:
+                            try:
+                                import secrets
+                                import hashlib
+                                import base64
+                                
+                                # Generate a cryptographically secure code verifier for PKCE
+                                code_verifier = secrets.token_urlsafe(64)
+                                
+                                # Hash the verifier using SHA-256 to create the challenge
+                                digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+                                code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+                                
+                                # Build the dynamic redirect URL containing the email and verifier query parameters
+                                redirect_to = f"{APP_URL}?email={email_input}&verifier={code_verifier}"
+                                
+                                # Request Magic Link OTP directly via GoTrue REST API with code challenge
+                                headers = {
+                                    "apikey": SUPABASE_KEY,
+                                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                                    "Content-Type": "application/json"
+                                }
+                                body = {
+                                    "email": email_input,
+                                    "gotrue_meta_security": {},
+                                    "code_challenge": code_challenge,
+                                    "code_challenge_method": "s256"
+                                }
+                                
+                                api_url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/otp"
+                                resp = requests.post(api_url, headers=headers, json=body, params={"redirect_to": redirect_to}, timeout=15)
+                                
+                                if resp.status_code != 200:
+                                    try:
+                                        err_msg = resp.json().get("msg", resp.text)
+                                    except Exception:
+                                        err_msg = resp.text
+                                    raise Exception(f"GoTrue API Error: {err_msg}")
+                                
+                                # Capture the code verifier and store globally
+                                st._pending_verifiers[email_input] = code_verifier
+                                
+                                st.session_state.login_email = email_input
+                                st.session_state.otp_sent = True
+                                st.success(f"Link sent successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to send link: {e}")
+                        else:
+                            st.warning("Please enter a valid email address.")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown("<h3 style='color:#ffffff; font-size:1.3rem; font-weight:700;'>🔮 Link Dispatched!</h3>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link has been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
+                    st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>Click the link in the email to automatically unlock this terminal!</p>", unsafe_allow_html=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    
+                    if st.button("⬅️ Back / Change Email", use_container_width=True, key="btn_back_magic"):
+                        st.session_state.otp_sent = False
+                        st.rerun()
+
+            with auth_tab2:
+                pwd_email = st.text_input("Email", placeholder="trader@example.com", key="pwd_email")
+                pwd_password = st.text_input("Password", type="password", placeholder="••••••••", key="pwd_password")
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                st.markdown("<div class='glow-btn'>", unsafe_allow_html=True)
-                if st.button("📩 Send Magic Link", use_container_width=True):
-                    if email_input:
-                        try:
-                            import secrets
-                            import hashlib
-                            import base64
-                            
-                            # Generate a cryptographically secure code verifier for PKCE
-                            code_verifier = secrets.token_urlsafe(64)
-                            
-                            # Hash the verifier using SHA-256 to create the challenge
-                            digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-                            code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-                            
-                            # Build the dynamic redirect URL containing the email and verifier query parameters
-                            redirect_to = f"{APP_URL}?email={email_input}&verifier={code_verifier}"
-                            
-                            # Request Magic Link OTP directly via GoTrue REST API with code challenge
-                            headers = {
-                                "apikey": SUPABASE_KEY,
-                                "Authorization": f"Bearer {SUPABASE_KEY}",
-                                "Content-Type": "application/json"
-                            }
-                            body = {
-                                "email": email_input,
-                                "gotrue_meta_security": {},
-                                "code_challenge": code_challenge,
-                                "code_challenge_method": "s256"
-                            }
-                            
-                            api_url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/otp"
-                            resp = requests.post(api_url, headers=headers, json=body, params={"redirect_to": redirect_to}, timeout=15)
-                            
-                            if resp.status_code != 200:
-                                try:
-                                    err_msg = resp.json().get("msg", resp.text)
-                                except Exception:
-                                    err_msg = resp.text
-                                raise Exception(f"GoTrue API Error: {err_msg}")
-                            
-                            # Capture the code verifier and store globally
-                            st._pending_verifiers[email_input] = code_verifier
-                            
-                            st.session_state.login_email = email_input
-                            st.session_state.otp_sent = True
-                            st.success(f"Link sent successfully!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to send link: {e}")
-                    else:
-                        st.warning("Please enter a valid email address.")
-                st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.markdown("<h3 style='color:#ffffff; font-size:1.3rem; font-weight:700;'>🔮 Link Dispatched!</h3>", unsafe_allow_html=True)
-                st.markdown(f"<p style='color:#a1a1aa; font-size:0.85rem;'>A secure magic login link has been sent to <b>{st.session_state.login_email}</b> (check inbox & spam folder).</p>", unsafe_allow_html=True)
-                st.markdown("<p style='color:#6366f1; font-size:0.85rem; font-weight:600;'>Click the link in the email to automatically unlock this terminal!</p>", unsafe_allow_html=True)
-                st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                if st.button("⬅️ Back / Change Email", use_container_width=True):
-                    st.session_state.otp_sent = False
-                    st.rerun()
+                col_login, col_signup = st.columns(2)
+                with col_login:
+                    st.markdown("<div class='glow-btn'>", unsafe_allow_html=True)
+                    if st.button("🔑 Log In", use_container_width=True, key="btn_pwd_login"):
+                        if pwd_email and pwd_password:
+                            try:
+                                res = supabase_client.auth.sign_in_with_password({
+                                    "email": pwd_email,
+                                    "password": pwd_password
+                                })
+                                if res.user:
+                                    st.session_state.supabase_user = res.user
+                                    st.success("Logged in successfully!")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Login failed: {e}")
+                        else:
+                            st.warning("Please enter both email and password.")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                with col_signup:
+                    st.markdown("<div class='glow-btn'>", unsafe_allow_html=True)
+                    if st.button("📝 Sign Up", use_container_width=True, key="btn_pwd_signup"):
+                        if pwd_email and pwd_password:
+                            try:
+                                res = supabase_client.auth.sign_up({
+                                    "email": pwd_email,
+                                    "password": pwd_password
+                                })
+                                if res.user:
+                                    if res.session:
+                                        st.session_state.supabase_user = res.user
+                                        st.success("Account created and logged in successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.info("Registration successful! Please check your email to confirm your account.")
+                            except Exception as e:
+                                st.error(f"Sign Up failed: {e}")
+                        else:
+                            st.warning("Please enter both email and password.")
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("</div>", unsafe_allow_html=True)
             
             # Show SQL editor copy-paste SQL details for setup help
             st.markdown("<br><br>", unsafe_allow_html=True)
