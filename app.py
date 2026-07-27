@@ -190,11 +190,11 @@ def get_supabase_client():
 
 supabase_client = get_supabase_client()
 
-def fetch_signals_from_db(pair):
+def fetch_signals_from_db(pair, timeframe):
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("*").eq("pair", pair).order("time", desc=True).limit(50).execute()
+        res = supabase_client.table("signals").select("*").eq("pair", pair).eq("timeframe", timeframe).order("time", desc=True).limit(50).execute()
         signals = []
         for r in (res.data if res.data else []):
             try:
@@ -1164,7 +1164,7 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"1 Minute": "1m", "5 Minutes": "5m"}
+timeframe_map = {"1 Minute": "1m", "5 Minutes": "5m", "15 Minutes": "15m"}
 timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=1)
 timeframe = timeframe_map[timeframe_sel]
 
@@ -1180,7 +1180,7 @@ show_patterns = st.sidebar.checkbox("Show Candlestick Patterns", value=True)
 # Cache live data downloads with 15s TTL to prevent rate limit blocks and make pair switching instant
 @st.cache_data(ttl=15)
 def get_live_data(pair, tf):
-    lookback = "2d" if tf == "5m" else "1d"
+    lookback = "2d" if tf == "5m" else ("5d" if tf == "15m" else "1d")
     try:
         df = yf.download(pair, period=lookback, interval=tf, progress=False, threads=False)
         if isinstance(df.columns, pd.MultiIndex):
@@ -1199,24 +1199,32 @@ if not df_live.empty:
 else:
     st.error("Failed to load live price data from yfinance.")
 
-# Synchronize signal history from Supabase on startup
+# Synchronize signal history from Supabase for the active pair and timeframe on every rerun
 if supabase_client is not None and "supabase_user" in st.session_state:
-    if "db_signals_loaded" not in st.session_state or not st.session_state.db_signals_loaded:
-        with st.spinner("Syncing signals database..."):
-            loaded_signals = []
-            for pair in RADAR_PAIRS:
-                loaded_signals.extend(fetch_signals_from_db(pair))
-            # Sort signals by timestamp descending
-            loaded_signals.sort(key=lambda x: x["time"], reverse=True)
-            st.session_state.signal_history = loaded_signals
-            st.session_state.db_signals_loaded = True
-
-# Auto evaluate results using cached df_live
-evaluate_pending_signals(df_live, active_pair)
+    st.session_state.signal_history = fetch_signals_from_db(active_pair, timeframe)
+    
+    # Real-time alert triggers on new central signals
+    if st.session_state.signal_history:
+        latest_sig = st.session_state.signal_history[0]
+        latest_sig_id = latest_sig["id"]
+        
+        if "last_alerted_signal" not in st.session_state:
+            st.session_state.last_alerted_signal = latest_sig_id
+            
+        if st.session_state.last_alerted_signal != latest_sig_id:
+            st.session_state.last_alerted_signal = latest_sig_id
+            
+            # Double check if the timestamp is very recent (e.g. within 2 minutes)
+            sig_time_utc = latest_sig["time"]
+            now_utc = datetime.datetime.now(pytz.utc)
+            if (now_utc - sig_time_utc).total_seconds() < 120:
+                st.toast(f"🔥 NEW CENTRAL SIGNAL DETECTED: {latest_sig['type']} on {latest_sig['pair'].replace('=X','')} [{latest_sig['timeframe']}]!", icon="🔊")
+                trigger_browser_beep()
 
 # Title
 st.title("⚡ BINARY PRO SCANNER V3")
 st.markdown("### `VIP-LEVEL TRADING STATION` | **ANTI-REPAINT**")
+st.info("🟢 **Centralized Sync Mode:** Dashboard is synchronized with the central 24/7 background worker.")
 
 # Calculate live session stats
 session_wins = sum(1 for sig in st.session_state.signal_history if sig["status"] == "WIN")
@@ -1436,71 +1444,7 @@ with col_center:
                     current_radar_info = radar_data.get(active_pair, {"trend": "NEUTRAL", "atr": 0.0})
                     st.metric(label="15m MTF Trend", value=current_radar_info["trend"], delta="Active Pair Trend")
                     
-                # Signal Scanning Trigger
-                if st.session_state.scanning and not news_blocked and not volatility_low and st.session_state.daily_losses < 3:
-                    sig_type = None
-                    confirmations = 0
-                    
-                    if closed_candle['Call_Score'] >= 4:
-                        sig_type = "CALL"
-                        confirmations = closed_candle['Call_Score']
-                    elif closed_candle['Put_Score'] >= 4:
-                        sig_type = "PUT"
-                        confirmations = closed_candle['Put_Score']
-                        
-                    # Handle trigger
-                    if sig_type and (st.session_state.last_processed_candle != closed_candle_time):
-                        st.session_state.last_processed_candle = closed_candle_time
-                        
-                        delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else datetime.timedelta(minutes=5)) * expiry_candles
-                        exit_time = closed_candle_time + delta_t
-                        
-                        pattern = closed_candle['Pattern_Label']
-                        strength = "NORMAL"
-                        
-                        # Confluence
-                        active_trend = current_radar_info["trend"]
-                        if (sig_type == "CALL" and active_trend == "UP") or (sig_type == "PUT" and active_trend == "DOWN"):
-                            strength = "STRONG++"
-                        elif pattern:
-                            strength = "STRONG"
-                            
-                        # Add to session history
-                        new_sig = {
-                            "id": str(int(time.time())),
-                            "time": closed_candle_time,
-                            "pair": active_pair,
-                            "timeframe": timeframe,
-                            "type": sig_type,
-                            "entry_price": closed_candle['Close'],
-                            "exit_time": exit_time,
-                            "exit_price": None,
-                            "status": "PENDING",
-                            "strength": strength,
-                            "confirmations": f"{confirmations}/5",
-                            "patterns": pattern if pattern else "None"
-                        }
-                        st.session_state.signal_history.append(new_sig)
-                        save_signal_to_db(new_sig)
-                        
-                        # Alerts
-                        trigger_browser_beep()
-                        alert_time_str = closed_candle_time.strftime("%I:%M %p PKT")
-                        st.toast(f"🔥 NEW VIP SIGNAL TRIGGERED: {sig_type} at {alert_time_str}!", icon="🔊")
-                        
-                        # Telegram Alert
-                        tg_text = f"🚨 <b>BINARY PRO SCANNER V3 SIGNAL</b>\n\n" \
-                                  f"<b>Asset:</b> {active_pair}\n" \
-                                  f"<b>Timeframe:</b> {timeframe_sel}\n" \
-                                  f"<b>Expiry:</b> {expiry_candles} candle(s)\n" \
-                                  f"<b>Type:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
-                                  f"<b>Entry Price:</b> {closed_candle['Close']:.5f}\n" \
-                                  f"<b>Confirmations:</b> {confirmations}/5\n" \
-                                  f"<b>Strength:</b> {strength}\n" \
-                                  f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
-                                  f"<b>Time:</b> {alert_time_str}\n\n" \
-                                  f"⚠️ <i>Auto Result evaluation will complete in {expiry_candles} candle(s) ({timeframe_sel}).</i>"
-                        send_telegram_alert(tg_token, tg_chat_id, tg_text)
+                # Signal Scanning: Signals are processed centrally by the background worker.
                 
                 # Render Multi-plot Plotly Chart
                 fig = make_subplots(
