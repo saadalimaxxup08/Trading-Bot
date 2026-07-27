@@ -25,8 +25,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCHF=X", 
-    "EURGBP=X", "GBPJPY=X", "GC=F", "ETH-USD", "SOL-USD"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "GC=F"
 ]
 
 # Scaled volatility thresholds lookup - Matches app.py
@@ -34,17 +33,11 @@ ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
-    "AUDUSD=X": 0.00005,
-    "USDCHF=X": 0.00005,
-    "EURGBP=X": 0.00005,
-    "GBPJPY=X": 0.01,
-    "GC=F": 0.2,       # Gold Futures
-    "ETH-USD": 1.0,
-    "SOL-USD": 0.1     # Solana
+    "GC=F": 0.2        # Gold Futures
 }
 
 # Scan settings
-TIMEFRAMES = ["1m", "5m", "15m"]
+TIMEFRAMES = ["5m"]
 
 def get_supabase_client():
     if not SUPABASE_URL or "your-project-id" in SUPABASE_URL:
@@ -301,8 +294,8 @@ def check_signals(df):
     # Never CALL if RSI is already overbought (RSI > 65)
     # Never PUT if RSI is already oversold (RSI < 35)
     rsi = df['RSI_14']
-    call_safe = rsi < 65
-    put_safe = rsi > 35
+    call_safe = (rsi < 65) & (df['Close'] > df['EMA_200'])
+    put_safe = (rsi > 35) & (df['Close'] < df['EMA_200'])
     
     # 3. Trend Alignment Confirmations
     # CALL favors price above EMA_50 or EMA_50 > EMA_200
@@ -416,6 +409,36 @@ def update_signal_in_db(sig_id, exit_price, status):
 # ----------------- SCANNING CORE -----------------
 last_processed_candles = {} # Keeps track of (pair, timeframe): last_timestamp
 
+def check_mtf_trend_ok(pair, sig_type):
+    """
+    Downloads 15m data for the pair and returns True if:
+      - For CALL: 15m EMA_50 > EMA_200
+      - For PUT: 15m EMA_50 < EMA_200
+    Otherwise returns False.
+    """
+    try:
+        df_15m = yf.download(pair, period="5d", interval="15m", progress=False, threads=False)
+        if df_15m.empty or len(df_15m) < 200:
+            return False
+            
+        if isinstance(df_15m.columns, pd.MultiIndex):
+            df_15m.columns = df_15m.columns.get_level_values(0)
+            
+        ema_50 = df_15m['Close'].ewm(span=50, adjust=False).mean()
+        ema_200 = df_15m['Close'].ewm(span=200, adjust=False).mean()
+        
+        last_ema_50 = ema_50.iloc[-2]
+        last_ema_200 = ema_200.iloc[-2]
+        
+        if sig_type == "CALL":
+            return last_ema_50 > last_ema_200
+        elif sig_type == "PUT":
+            return last_ema_50 < last_ema_200
+        return False
+    except Exception as e:
+        print(f"Error checking 15m MTF trend for {pair}: {e}")
+        return False
+
 def process_market_signals(pair, timeframe):
     lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
     
@@ -476,6 +499,10 @@ def process_market_signals(pair, timeframe):
             confirmations = closed_candle['Put_Score']
             
         if sig_type:
+            # Enforce MTF Hard Rule for 5m signals
+            if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
+                return
+                
             # Expiry selection default is 1 candle
             delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
             exit_time = closed_candle_time + delta_t
@@ -591,6 +618,10 @@ def process_market_signals_prefetched(pair, timeframe, df):
             confirmations = closed_candle['Put_Score']
             
         if sig_type:
+            # Enforce MTF Hard Rule for 5m signals
+            if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
+                return
+                
             # Expiry selection default is 1 candle
             delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
             exit_time = closed_candle_time + delta_t

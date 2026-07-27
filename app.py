@@ -155,7 +155,7 @@ except Exception:
 
 # Initialize persistent session states
 if "selected_pair" not in st.session_state:
-    st.session_state.selected_pair = "SOL-USD"
+    st.session_state.selected_pair = "EURUSD=X"
 if "scanning" not in st.session_state:
     st.session_state.scanning = True
 if "signal_history" not in st.session_state:
@@ -216,8 +216,8 @@ def start_background_scanner():
                 worker.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
                 
                 # Run the scanning process using high-speed parallel batch downloading
-                for timeframe in ["1m", "5m", "15m"]:
-                    lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
+                for timeframe in ["5m"]:
+                    lookback = "2d"
                     try:
                         # Fetch all tickers in parallel in a single HTTP request (extremely fast)
                         df_batch = yf.download(worker.RADAR_PAIRS, period=lookback, interval=timeframe, group_by="ticker", progress=False, threads=True)
@@ -661,8 +661,7 @@ else:
 
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCHF=X", 
-    "EURGBP=X", "GBPJPY=X", "GC=F", "ETH-USD", "SOL-USD"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "GC=F"
 ]
 
 # Scaled volatility thresholds lookup
@@ -670,13 +669,7 @@ ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
-    "AUDUSD=X": 0.00005,
-    "USDCHF=X": 0.00005,
-    "EURGBP=X": 0.00005,
-    "GBPJPY=X": 0.01,
-    "GC=F": 0.2,       # Gold Futures
-    "ETH-USD": 1.0,
-    "SOL-USD": 0.1     # Solana
+    "GC=F": 0.2        # Gold Futures
 }
 
 # ----------------- NEWS FILTER MODULE -----------------
@@ -1057,9 +1050,9 @@ def calculate_radar_data():
             try:
                 # Extract ticker subset
                 if len(RADAR_PAIRS) > 1 and pair in df_batch.columns.get_level_values(0):
-                    df_pair = df_batch[pair].dropna()
+                    df_pair = df_batch[pair].dropna(subset=['Close'])
                 else:
-                    df_pair = df_batch.dropna()
+                    df_pair = df_batch.dropna(subset=['Close'])
                 
                 if len(df_pair) >= 50:
                     # 15m Trend Calculation
@@ -1260,13 +1253,7 @@ readable_names = {
     "EURUSD=X": "EUR/USD",
     "GBPUSD=X": "GBP/USD",
     "USDJPY=X": "USD/JPY",
-    "AUDUSD=X": "AUD/USD",
-    "USDCHF=X": "USD/CHF",
-    "EURGBP=X": "EUR/GBP",
-    "GBPJPY=X": "GBP/JPY",
-    "GC=F": "GOLD (GC=F)",
-    "ETH-USD": "ETH/USD",
-    "SOL-USD": "SOL/USD"
+    "GC=F": "GOLD (GC=F)"
 }
 
 # Determine current selectbox index based on session state
@@ -1284,8 +1271,8 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"1 Minute": "1m", "5 Minutes": "5m", "15 Minutes": "15m"}
-timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=1)
+timeframe_map = {"5 Minutes": "5m"}
+timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=0)
 timeframe = timeframe_map[timeframe_sel]
 
 # Expiry selection (1 to 5 candles)
