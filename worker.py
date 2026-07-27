@@ -382,7 +382,14 @@ def process_market_signals(pair, timeframe):
             
             success = save_signal_to_db(new_sig)
             if success:
-                alert_time_str = closed_candle_time.strftime("%I:%M %p PKT")
+                # Convert closed_candle_time to Pakistan timezone (Asia/Karachi)
+                pkt_tz = pytz.timezone("Asia/Karachi")
+                if closed_candle_time.tzinfo is not None:
+                    closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
+                else:
+                    closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
+                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p PKT")
+                
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {alert_time_str}")
                 
                 # Format and send Telegram notification

@@ -190,6 +190,47 @@ def get_supabase_client():
 
 supabase_client = get_supabase_client()
 
+# Start background scanner thread in the cloud automatically
+@st.cache_resource
+def start_background_scanner():
+    import threading
+    import time
+    import worker
+    import pytz
+    
+    def scanner_thread_func():
+        print("[START] 24/7 Cloud Background Scanner Active")
+        while True:
+            try:
+                # Reload environment variables in case they were updated via UI/save
+                from dotenv import load_dotenv
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                env_path = os.path.join(current_dir, ".env")
+                load_dotenv(dotenv_path=env_path, override=True)
+                
+                # Re-read tokens from env so that worker updates its tokens
+                worker.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+                worker.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+                
+                # Run the scanning process
+                for timeframe in ["1m", "5m", "15m"]:
+                    for pair in worker.RADAR_PAIRS:
+                        worker.process_market_signals(pair, timeframe)
+                        time.sleep(1.5)
+                
+                worker.resolve_pending_signals()
+                time.sleep(30)
+            except Exception as e:
+                print(f"Background scanner loop error: {e}")
+                time.sleep(15)
+                
+    thread = threading.Thread(target=scanner_thread_func, daemon=True)
+    thread.start()
+    return thread
+
+if supabase_client is not None:
+    start_background_scanner()
+
 def fetch_signals_from_db(pair, timeframe):
     if supabase_client is None:
         return []
@@ -266,7 +307,18 @@ def update_signal_in_db(sig):
 
 # Secure login screen check
 if supabase_client is not None:
-    # Check if redirect query parameters exist (passed on Magic Link click)
+    # 1. Restore session from refresh token (rt) in query params if available
+    if "supabase_user" not in st.session_state and "rt" in st.query_params:
+        try:
+            res = supabase_client.auth.refresh_session(st.query_params["rt"])
+            if res.user:
+                st.session_state.supabase_user = res.user
+                st.query_params["rt"] = res.session.refresh_token
+        except Exception:
+            # Token invalid or expired, clear it
+            st.query_params.pop("rt", None)
+
+    # 2. Check if redirect query parameters exist (passed on Magic Link click)
     if "code" in st.query_params and "email" in st.query_params:
         code = st.query_params["code"]
         email = st.query_params["email"]
@@ -281,6 +333,7 @@ if supabase_client is not None:
                 if res.user:
                     st.session_state.supabase_user = res.user
                     st.query_params.clear()
+                    st.query_params["rt"] = res.session.refresh_token
                     st._pending_verifiers.pop(email, None)
                     st.success("Authenticated Successfully!")
                     st.rerun()
@@ -429,6 +482,7 @@ if supabase_client is not None:
                                 })
                                 if res.user:
                                     st.session_state.supabase_user = res.user
+                                    st.query_params["rt"] = res.session.refresh_token
                                     st.success("Logged in successfully!")
                                     st.rerun()
                             except Exception as e:
@@ -448,6 +502,7 @@ if supabase_client is not None:
                                 if res.user:
                                     if res.session:
                                         st.session_state.supabase_user = res.user
+                                        st.query_params["rt"] = res.session.refresh_token
                                         st.success("Account created and logged in successfully!")
                                         st.rerun()
                                     else:
@@ -1291,8 +1346,54 @@ if st.sidebar.button("♻️ Reset Losses"):
 # Telegram Settings Panel
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ✈️ TELEGRAM ALERTS")
-tg_token = st.sidebar.text_input("Bot Token", type="password", help="Telegram Bot Token")
-tg_chat_id = st.sidebar.text_input("Chat ID", type="password", help="Telegram Chat ID")
+
+# Load existing values from environment variables to pre-fill the fields
+env_tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+env_tg_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+tg_token = st.sidebar.text_input("Bot Token", value=env_tg_token, type="password", help="Telegram Bot Token")
+tg_chat_id = st.sidebar.text_input("Chat ID", value=env_tg_chat_id, type="password", help="Telegram Chat ID")
+
+if st.sidebar.button("💾 Save Telegram Settings", use_container_width=True):
+    if tg_token and tg_chat_id:
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            env_path = os.path.join(current_dir, ".env")
+            
+            env_lines = []
+            if os.path.exists(env_path):
+                with open(env_path, "r") as f:
+                    env_lines = f.readlines()
+                    
+            updated_token = False
+            updated_chat = False
+            
+            for idx, line in enumerate(env_lines):
+                if line.startswith("TELEGRAM_BOT_TOKEN="):
+                    env_lines[idx] = f"TELEGRAM_BOT_TOKEN={tg_token}\n"
+                    updated_token = True
+                elif line.startswith("TELEGRAM_CHAT_ID="):
+                    env_lines[idx] = f"TELEGRAM_CHAT_ID={tg_chat_id}\n"
+                    updated_chat = True
+                    
+            if not updated_token:
+                env_lines.append(f"TELEGRAM_BOT_TOKEN={tg_token}\n")
+            if not updated_chat:
+                env_lines.append(f"TELEGRAM_CHAT_ID={tg_chat_id}\n")
+                
+            with open(env_path, "w") as f:
+                f.writelines(env_lines)
+                
+            # Immediately update the active environment variables
+            os.environ["TELEGRAM_BOT_TOKEN"] = tg_token
+            os.environ["TELEGRAM_CHAT_ID"] = tg_chat_id
+            
+            st.sidebar.success("Saved to local .env config!")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Failed to save settings: {e}")
+    else:
+        st.sidebar.warning("Please fill both Token and Chat ID.")
 
 # Currency Converter Sidebar
 st.sidebar.markdown("---")
@@ -1332,6 +1433,7 @@ if st.sidebar.button("🚪 Log Out", use_container_width=True):
         del st.session_state.supabase_user
     if "db_signals_loaded" in st.session_state:
         st.session_state.db_signals_loaded = False
+    st.query_params.pop("rt", None)
     st.rerun()
 
 # ----------------- THREE COLUMN LAYOUT ASSEMBLY -----------------
@@ -1597,7 +1699,7 @@ with col_right:
                 else:
                     badge_status = "<span class='badge badge-pending' style='font-size:0.7rem;'>PENDING</span>"
                     
-                time_str = sig["time"].strftime("%I:%M %p")
+                time_str = sig["time"].astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p")
                 
                 html_right_table += f"""
                     <tr style="border-bottom: 1px solid #374151;">
