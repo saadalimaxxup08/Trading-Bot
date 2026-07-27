@@ -487,6 +487,152 @@ def process_market_signals(pair, timeframe):
     except Exception as e:
         print(f"Error processing market signals for {pair} [{timeframe}]: {e}")
 
+def process_market_signals_prefetched(pair, timeframe, df):
+    if df.empty:
+        return
+    try:
+        df = calculate_indicators(df)
+        df = check_signals(df)
+        
+        if len(df) < 2:
+            return
+
+        # Check the closed candle (index -2)
+        closed_candle = df.iloc[-2]
+        closed_candle_time = df.index[-2]
+        
+        # Prevent double-processing the same candle
+        key = (pair, timeframe)
+        if last_processed_candles.get(key) == closed_candle_time:
+            return
+        
+        last_processed_candles[key] = closed_candle_time
+        
+        # Volatility check
+        volatility_low = closed_candle['Low_Volatility']
+        if volatility_low:
+            return # Skip signal checks in low volatility environment
+            
+        sig_type = None
+        confirmations = 0
+        
+        if closed_candle['Call_Score'] >= 4:
+            sig_type = "CALL"
+            confirmations = closed_candle['Call_Score']
+        elif closed_candle['Put_Score'] >= 4:
+            sig_type = "PUT"
+            confirmations = closed_candle['Put_Score']
+            
+        if sig_type:
+            # Expiry selection default is 1 candle
+            delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
+            exit_time = closed_candle_time + delta_t
+            
+            pattern = closed_candle['Pattern_Label']
+            strength = "NORMAL"
+            
+            if pattern:
+                strength = "STRONG"
+                
+            new_sig = {
+                "id": str(int(time.time())) + f"-{pair}-{timeframe}",
+                "time": closed_candle_time,
+                "pair": pair,
+                "timeframe": timeframe,
+                "type": sig_type,
+                "entry_price": float(closed_candle['Close']),
+                "exit_time": exit_time,
+                "exit_price": None,
+                "status": "PENDING",
+                "strength": strength,
+                "confirmations": f"{confirmations}/5",
+                "patterns": pattern if pattern else "None"
+            }
+            
+            success = save_signal_to_db(new_sig)
+            if success:
+                pkt_tz = pytz.timezone("Asia/Riyadh")
+                if closed_candle_time.tzinfo is not None:
+                    closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
+                else:
+                    closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
+                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
+                
+                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {alert_time_str}")
+                
+                tg_text = f"🚨 <b>CENTRAL BINARY PRO V3 SIGNAL</b>\n\n" \
+                          f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
+                          f"<b>Timeframe:</b> {timeframe}\n" \
+                          f"<b>Type:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
+                          f"<b>Entry Price:</b> {closed_candle['Close']:.5f}\n" \
+                          f"<b>Confirmations:</b> {confirmations}/5\n" \
+                          f"<b>Strength:</b> {strength}\n" \
+                          f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
+                          f"<b>Time:</b> {alert_time_str}\n\n" \
+                          f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"
+                send_telegram_alert(tg_text)
+                
+    except Exception as e:
+        print(f"Error prefetched processing for {pair} [{timeframe}]: {e}")
+
+def send_hourly_summary():
+    if supabase_client is None:
+        return
+    try:
+        import datetime
+        import pytz
+        import pandas as pd
+        
+        tz_ry = pytz.timezone("Asia/Riyadh")
+        now_ry = datetime.datetime.now(tz_ry)
+        start_time_ry = now_ry - datetime.timedelta(hours=1)
+        start_time_utc = start_time_ry.astimezone(pytz.utc).isoformat()
+        
+        res = supabase_client.table("signals").select("*").gte("time", start_time_utc).order("time", desc=True).execute()
+        signals = res.data if res.data else []
+        
+        period_str = f"{start_time_ry.strftime('%I:%M %p')} - {now_ry.strftime('%I:%M %p')}"
+        
+        msg = f"🕒 <b>HOURLY TRADING REPORT</b>\n"
+        msg += f"⏱️ <b>Period:</b> <code>{period_str}</code> (Jeddah Time)\n\n"
+        
+        for tf in ["1m", "5m", "15m"]:
+            tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
+            tf_sigs = [s for s in signals if s["timeframe"] == tf]
+            
+            wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
+            losses = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+            ties = sum(1 for s in tf_sigs if s["status"] == "TIE")
+            total_wl = wins + losses
+            winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
+            
+            msg += f"<b>{tf_display} Trades</b> ({wins}W - {losses}L | {winrate:.1f}%):\n"
+            if tf_sigs:
+                for sig in tf_sigs:
+                    sig_time_utc = pd.to_datetime(sig["time"])
+                    if sig_time_utc.tzinfo is None:
+                        sig_time_utc = pytz.utc.localize(sig_time_utc)
+                    sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                    time_str = sig_time_ry.strftime("%I:%M %p")
+                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                    
+                    status_emoji = "⏳"
+                    if sig["status"] == "WIN":
+                        status_emoji = "🟢 WIN"
+                    elif sig["status"] == "LOSS":
+                        status_emoji = "🔴 LOSS"
+                    elif sig["status"] == "TIE":
+                        status_emoji = "⚪ TIE"
+                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji}\n"
+            else:
+                msg += "<i>No trades triggered.</i>\n"
+            msg += "\n"
+            
+        send_telegram_alert(msg)
+        print(f"[SUMMARY] Hourly summary successfully sent for {period_str} AST.")
+    except Exception as e:
+        print(f"Error generating hourly summary: {e}")
+
 def resolve_pending_signals():
     pending_signals = fetch_pending_signals()
     if not pending_signals:

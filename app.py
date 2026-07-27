@@ -201,7 +201,8 @@ def start_background_scanner():
     def scanner_thread_func():
         print("[START] 24/7 Cloud Background Scanner Active")
         import datetime
-        last_summary_date = None
+        last_daily_sent_date = None
+        last_hourly_sent_hour = None
         while True:
             try:
                 # Reload environment variables in case they were updated via UI/save
@@ -214,20 +215,40 @@ def start_background_scanner():
                 worker.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
                 worker.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
                 
-                # Run the scanning process
+                # Run the scanning process using high-speed parallel batch downloading
                 for timeframe in ["1m", "5m", "15m"]:
-                    for pair in worker.RADAR_PAIRS:
-                        worker.process_market_signals(pair, timeframe)
-                        time.sleep(1.5)
+                    lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
+                    try:
+                        # Fetch all tickers in parallel in a single HTTP request (extremely fast)
+                        df_batch = yf.download(worker.RADAR_PAIRS, period=lookback, interval=timeframe, group_by="ticker", progress=False, threads=True)
+                        if not df_batch.empty:
+                            for pair in worker.RADAR_PAIRS:
+                                if len(worker.RADAR_PAIRS) > 1 and pair in df_batch.columns.get_level_values(0):
+                                    df_pair = df_batch[pair].dropna()
+                                else:
+                                    df_pair = df_batch.dropna()
+                                worker.process_market_signals_prefetched(pair, timeframe, df_pair)
+                    except Exception as e:
+                        print(f"Batch download error for {timeframe}: {e}")
+                    time.sleep(1.0)
                 
                 worker.resolve_pending_signals()
                 
-                # Check if it is 9:00 PM AST in Saudi Arabia to send the daily report
+                # Check current time in Saudi Arabia (Jeddah/Riyadh)
                 tz_ry = pytz.timezone("Asia/Riyadh")
                 now_ry = datetime.datetime.now(tz_ry)
-                if now_ry.hour == 21 and now_ry.minute == 0 and last_summary_date != now_ry.strftime("%Y-%m-%d"):
+                
+                # 1. Hourly Summary Trigger (at the start of every hour, e.g., 5:00 PM, 6:00 PM)
+                hour_key = now_ry.strftime("%Y-%m-%d-%H")
+                if now_ry.minute == 0 and last_hourly_sent_hour != hour_key:
+                    worker.send_hourly_summary()
+                    last_hourly_sent_hour = hour_key
+                
+                # 2. Daily Summary Trigger (at 9:00 PM Saudi Arabia Time)
+                date_key = now_ry.strftime("%Y-%m-%d")
+                if now_ry.hour == 21 and now_ry.minute == 0 and last_daily_sent_date != date_key:
                     worker.send_daily_summary()
-                    last_summary_date = now_ry.strftime("%Y-%m-%d")
+                    last_daily_sent_date = date_key
                 
                 time.sleep(30)
             except Exception as e:
