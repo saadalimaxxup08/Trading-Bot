@@ -271,6 +271,46 @@ def fetch_signals_from_db(pair, timeframe):
     except Exception:
         return []
 
+def fetch_all_signals_from_db(limit=200):
+    if supabase_client is None:
+        return []
+    try:
+        res = supabase_client.table("signals").select("*").order("time", desc=True).limit(limit).execute()
+        signals = []
+        for r in (res.data if res.data else []):
+            try:
+                sig_time = pd.to_datetime(r["time"]).to_pydatetime()
+                if sig_time.tzinfo is None:
+                    sig_time = pytz.utc.localize(sig_time)
+                else:
+                    sig_time = sig_time.astimezone(pytz.utc)
+                
+                sig_exit_time = pd.to_datetime(r["exit_time"]).to_pydatetime()
+                if sig_exit_time.tzinfo is None:
+                    sig_exit_time = pytz.utc.localize(sig_exit_time)
+                else:
+                    sig_exit_time = sig_exit_time.astimezone(pytz.utc)
+                    
+                signals.append({
+                    "id": r["id"],
+                    "time": sig_time,
+                    "pair": r["pair"],
+                    "timeframe": r["timeframe"],
+                    "type": r["type"],
+                    "entry_price": float(r["entry_price"]),
+                    "exit_time": sig_exit_time,
+                    "exit_price": float(r["exit_price"]) if r["exit_price"] is not None else None,
+                    "status": r["status"],
+                    "strength": r["strength"],
+                    "confirmations": r["confirmations"],
+                    "patterns": r["patterns"]
+                })
+            except Exception:
+                pass
+        return signals
+    except Exception:
+        return []
+
 def save_signal_to_db(sig):
     if supabase_client is None:
         return
@@ -1684,78 +1724,176 @@ with col_center:
 
 # RIGHT COLUMN - LIVE COMPACT SIGNAL LOGS & METRICS
 with col_right:
-    st.markdown("## 📡 LOGS FEED")
-    st.caption(f"Real-Time Signal Audit: {active_pair.replace('=X','')}")
+    st.markdown("## 📡 LOGS & STATS")
     
     if st.session_state.daily_losses >= 3:
         st.error("🚨 STOP TRADING TODAY! DAILY MAX 3 LOSS REACHED.")
         st.session_state.scanning = False
         
-    filtered_log = [sig for sig in st.session_state.signal_history if sig["pair"] == active_pair]
+    tab_active, tab_overall = st.tabs(["🎯 ACTIVE PAIR", "📊 OVERALL ANALYTICS"])
     
-    # Wrap logs feed inside a scrollable container matching other columns
-    with st.container(height=450):
-        if filtered_log:
-            html_right_table = """
-            <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.8rem;">
-                <thead>
-                    <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
-                        <th style="padding: 8px 10px;">Time</th>
-                        <th style="padding: 8px 10px;">Type</th>
-                        <th style="padding: 8px 10px;">Confirmations</th>
-                        <th style="padding: 8px 10px;">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
-            for sig in reversed(filtered_log[-10:]):
-                badge_type = f"<span class='badge badge-call' style='font-size:0.7rem;'>CALL</span>" if sig["type"] == "CALL" else f"<span class='badge badge-put' style='font-size:0.7rem;'>PUT</span>"
-                
-                badge_status = ""
-                if sig["status"] == "WIN":
-                    badge_status = "<span class='badge badge-win' style='font-size:0.7rem;'>WIN</span>"
-                elif sig["status"] == "LOSS":
-                    badge_status = "<span class='badge badge-loss' style='font-size:0.7rem;'>LOSS</span>"
-                elif sig["status"] == "TIE":
-                    badge_status = "<span class='badge badge-tie' style='font-size:0.7rem;'>TIE</span>"
-                else:
-                    badge_status = "<span class='badge badge-pending' style='font-size:0.7rem;'>PENDING</span>"
-                    
-                time_str = sig["time"].astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p")
-                
-                html_right_table += f"""
-                    <tr style="border-bottom: 1px solid #374151;">
-                        <td style="padding: 8px 10px;">{time_str}</td>
-                        <td style="padding: 8px 10px;">{badge_type}</td>
-                        <td style="padding: 8px 10px; font-weight:600;">{sig["confirmations"]}</td>
-                        <td style="padding: 8px 10px;">{badge_status}</td>
-                    </tr>
+    with tab_active:
+        st.caption(f"Signal Audit: {active_pair.replace('=X','')} [{timeframe}]")
+        filtered_log = [sig for sig in st.session_state.signal_history if sig["pair"] == active_pair]
+        
+        # Wrap logs feed inside a scrollable container matching other columns
+        with st.container(height=450):
+            if filtered_log:
+                html_right_table = """
+                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.8rem;">
+                    <thead>
+                        <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
+                            <th style="padding: 8px 10px;">Time</th>
+                            <th style="padding: 8px 10px;">Type</th>
+                            <th style="padding: 8px 10px;">Confirmations</th>
+                            <th style="padding: 8px 10px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                 """
-            html_right_table += "</tbody></table>"
-            st.markdown(html_right_table, unsafe_allow_html=True)
-            
-            # CSV Export Button
-            try:
-                log_df = pd.DataFrame(filtered_log)
-                # Format times for Excel/CSV readability
-                if 'time' in log_df.columns:
-                    log_df['time'] = log_df['time'].apply(lambda x: x.strftime("%Y-%m-%d %I:%M %p") if hasattr(x, 'strftime') else str(x))
-                if 'exit_time' in log_df.columns:
-                    log_df['exit_time'] = log_df['exit_time'].apply(lambda x: x.strftime("%Y-%m-%d %I:%M %p") if hasattr(x, 'strftime') else str(x))
+                for sig in reversed(filtered_log[-10:]):
+                    badge_type = f"<span class='badge badge-call' style='font-size:0.7rem;'>CALL</span>" if sig["type"] == "CALL" else f"<span class='badge badge-put' style='font-size:0.7rem;'>PUT</span>"
+                    
+                    badge_status = ""
+                    if sig["status"] == "WIN":
+                        badge_status = "<span class='badge badge-win' style='font-size:0.7rem;'>WIN</span>"
+                    elif sig["status"] == "LOSS":
+                        badge_status = "<span class='badge badge-loss' style='font-size:0.7rem;'>LOSS</span>"
+                    elif sig["status"] == "TIE":
+                        badge_status = "<span class='badge badge-tie' style='font-size:0.7rem;'>TIE</span>"
+                    else:
+                        badge_status = "<span class='badge badge-pending' style='font-size:0.7rem;'>PENDING</span>"
+                        
+                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p")
+                    
+                    html_right_table += f"""
+                        <tr style="border-bottom: 1px solid #374151;">
+                            <td style="padding: 8px 10px;">{time_str}</td>
+                            <td style="padding: 8px 10px;">{badge_type}</td>
+                            <td style="padding: 8px 10px; font-weight:600;">{sig["confirmations"]}</td>
+                            <td style="padding: 8px 10px;">{badge_status}</td>
+                        </tr>
+                    """
+                html_right_table += "</tbody></table>"
+                st.markdown(html_right_table, unsafe_allow_html=True)
                 
-                csv_data = log_df.to_csv(index=False).encode('utf-8')
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.download_button(
-                    label="📥 Export Session Log (CSV)",
-                    data=csv_data,
-                    file_name=f"{active_pair}_signal_history.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            except Exception:
-                pass
-        else:
-            st.write("No signals triggered on active pair yet.")
+                # CSV Export Button
+                try:
+                    log_df = pd.DataFrame(filtered_log)
+                    # Format times for Excel/CSV readability
+                    if 'time' in log_df.columns:
+                        log_df['time'] = log_df['time'].apply(lambda x: x.strftime("%Y-%m-%d %I:%M %p") if hasattr(x, 'strftime') else str(x))
+                    if 'exit_time' in log_df.columns:
+                        log_df['exit_time'] = log_df['exit_time'].apply(lambda x: x.strftime("%Y-%m-%d %I:%M %p") if hasattr(x, 'strftime') else str(x))
+                    
+                    csv_data = log_df.to_csv(index=False).encode('utf-8')
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.download_button(
+                        label="📥 Export Session Log (CSV)",
+                        data=csv_data,
+                        file_name=f"{active_pair}_signal_history.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                except Exception:
+                    pass
+            else:
+                st.write("No signals triggered on active pair yet.")
+                
+    with tab_overall:
+        st.caption("All-Time Performance & Timeframe Breakdown")
+        
+        # Load all signals across all pairs and timeframes
+        all_signals = fetch_all_signals_from_db(limit=200)
+        
+        with st.container(height=450):
+            if all_signals:
+                # 1. TIMEFRAME STATS BREAKDOWN TABLE
+                stats = {}
+                for tf in ["1m", "5m", "15m"]:
+                    tf_signals = [s for s in all_signals if s["timeframe"] == tf]
+                    wins = sum(1 for s in tf_signals if s["status"] == "WIN")
+                    losses = sum(1 for s in tf_signals if s["status"] == "LOSS")
+                    ties = sum(1 for s in tf_signals if s["status"] == "TIE")
+                    total_wl = wins + losses
+                    winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
+                    stats[tf] = {
+                        "total": len(tf_signals),
+                        "wins": wins,
+                        "losses": losses,
+                        "winrate": winrate
+                    }
+                
+                html_stats_table = """
+                <h5 style="margin: 0 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;">⏱️ STATS BY TIMEFRAME</h5>
+                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.75rem; margin-bottom: 20px;">
+                    <thead>
+                        <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
+                            <th style="padding: 6px 8px;">TF</th>
+                            <th style="padding: 6px 8px;">Signals</th>
+                            <th style="padding: 6px 8px;">W / L</th>
+                            <th style="padding: 6px 8px;">Accuracy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                """
+                for tf in ["1m", "5m", "15m"]:
+                    tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
+                    color_acc = "#4caf50" if stats[tf]["winrate"] >= 60 else ("#ff9800" if stats[tf]["winrate"] >= 40 else "#ff1744")
+                    html_stats_table += f"""
+                        <tr style="border-bottom: 1px solid #374151;">
+                            <td style="padding: 6px 8px; font-weight:bold;">{tf_display}</td>
+                            <td style="padding: 6px 8px;">{stats[tf]["total"]}</td>
+                            <td style="padding: 6px 8px; color:#a5d6a7;">{stats[tf]["wins"]}W <span style="color:#ef9a9a;">{stats[tf]["losses"]}L</span></td>
+                            <td style="padding: 6px 8px; font-weight:bold; color:{color_acc};">{stats[tf]["winrate"]:.1f}%</td>
+                        </tr>
+                    """
+                html_stats_table += "</tbody></table>"
+                st.markdown(html_stats_table, unsafe_allow_html=True)
+                
+                # 2. LATEST 10 GLOBAL SIGNALS FEED
+                html_global_table = """
+                <h5 style="margin: 15px 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;">🌍 LATEST GLOBAL SIGNALS</h5>
+                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.75rem;">
+                    <thead>
+                        <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
+                            <th style="padding: 6px 8px;">Time</th>
+                            <th style="padding: 6px 8px;">Pair</th>
+                            <th style="padding: 6px 8px;">TF</th>
+                            <th style="padding: 6px 8px;">Type</th>
+                            <th style="padding: 6px 8px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                """
+                for sig in all_signals[:10]:
+                    badge_type = f"<span class='badge badge-call' style='font-size:0.6rem; padding: 2px 6px;'>CALL</span>" if sig["type"] == "CALL" else f"<span class='badge badge-put' style='font-size:0.6rem; padding: 2px 6px;'>PUT</span>"
+                    badge_status = ""
+                    if sig["status"] == "WIN":
+                        badge_status = "<span class='badge badge-win' style='font-size:0.6rem; padding: 2px 6px;'>WIN</span>"
+                    elif sig["status"] == "LOSS":
+                        badge_status = "<span class='badge badge-loss' style='font-size:0.6rem; padding: 2px 6px;'>LOSS</span>"
+                    elif sig["status"] == "TIE":
+                        badge_status = "<span class='badge badge-tie' style='font-size:0.6rem; padding: 2px 6px;'>TIE</span>"
+                    else:
+                        badge_status = "<span class='badge badge-pending' style='font-size:0.6rem; padding: 2px 6px;'>PEND</span>"
+                    
+                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Karachi")).strftime("%I:%M %p")
+                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                    
+                    html_global_table += f"""
+                        <tr style="border-bottom: 1px solid #374151;">
+                            <td style="padding: 6px 8px;">{time_str}</td>
+                            <td style="padding: 6px 8px; font-weight:bold;">{pair_clean}</td>
+                            <td style="padding: 6px 8px;">{sig["timeframe"]}</td>
+                            <td style="padding: 6px 8px;">{badge_type}</td>
+                            <td style="padding: 6px 8px;">{badge_status}</td>
+                        </tr>
+                    """
+                html_global_table += "</tbody></table>"
+                st.markdown(html_global_table, unsafe_allow_html=True)
+            else:
+                st.write("No historical signals recorded in the database yet.")
 
 # Autorefresh script (30 seconds) using native sleep and rerun to prevent browser reload session loss
 if supabase_client is not None and "supabase_user" in st.session_state and st.session_state.scanning:
