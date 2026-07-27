@@ -1603,19 +1603,8 @@ with col_center:
                 fig.update_yaxes(gridcolor='#1e293b', zerolinecolor='#1e293b')
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Autorefresh script (30 seconds)
+                # Autorefresh caption (sleep/rerun loop handles updates at the end of the script)
                 if st.session_state.scanning:
-                    st.components.v1.html(
-                        f"""
-                        <script>
-                        setTimeout(function() {{
-                            window.parent.location.reload();
-                        }}, 30000);
-                        </script>
-                        """,
-                        height=0,
-                        width=0
-                    )
                     st.caption("🔄 Auto-refresh active (30s interval)")
             else:
                 st.error("Empty data received for active pair.")
@@ -1699,3 +1688,9 @@ with col_right:
                 pass
         else:
             st.write("No signals triggered on active pair yet.")
+
+# Autorefresh script (30 seconds) using native sleep and rerun to prevent browser reload session loss
+if supabase_client is not None and "supabase_user" in st.session_state and st.session_state.scanning:
+    import time
+    time.sleep(30)
+    st.rerun()
