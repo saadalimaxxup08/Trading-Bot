@@ -250,7 +250,7 @@ def start_background_scanner():
                     worker.send_daily_summary()
                     last_daily_sent_date = date_key
                 
-                time.sleep(30)
+                time.sleep(10)
             except Exception as e:
                 print(f"Background scanner loop error: {e}")
                 time.sleep(15)

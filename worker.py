@@ -406,9 +406,26 @@ def process_market_signals(pair, timeframe):
         if len(df) < 2:
             return
 
-        # Check the closed candle (index -2)
-        closed_candle = df.iloc[-2]
-        closed_candle_time = df.index[-2]
+        # Smart Closed Candle selection (bypass yfinance active candle latency)
+        import datetime
+        import pytz
+        now_utc = datetime.datetime.now(pytz.utc)
+        delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
+        
+        last_candle_time = df.index[-1]
+        if last_candle_time.tzinfo is None:
+            last_candle_time = pytz.utc.localize(last_candle_time)
+        else:
+            last_candle_time = last_candle_time.astimezone(pytz.utc)
+            
+        last_candle_end = last_candle_time + delta_t
+        
+        if now_utc >= last_candle_end:
+            closed_candle = df.iloc[-1]
+            closed_candle_time = df.index[-1]
+        else:
+            closed_candle = df.iloc[-2]
+            closed_candle_time = df.index[-2]
         
         # Prevent double-processing the same candle
         key = (pair, timeframe)
@@ -497,9 +514,26 @@ def process_market_signals_prefetched(pair, timeframe, df):
         if len(df) < 2:
             return
 
-        # Check the closed candle (index -2)
-        closed_candle = df.iloc[-2]
-        closed_candle_time = df.index[-2]
+        # Smart Closed Candle selection (bypass yfinance active candle latency)
+        import datetime
+        import pytz
+        now_utc = datetime.datetime.now(pytz.utc)
+        delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
+        
+        last_candle_time = df.index[-1]
+        if last_candle_time.tzinfo is None:
+            last_candle_time = pytz.utc.localize(last_candle_time)
+        else:
+            last_candle_time = last_candle_time.astimezone(pytz.utc)
+            
+        last_candle_end = last_candle_time + delta_t
+        
+        if now_utc >= last_candle_end:
+            closed_candle = df.iloc[-1]
+            closed_candle_time = df.index[-1]
+        else:
+            closed_candle = df.iloc[-2]
+            closed_candle_time = df.index[-2]
         
         # Prevent double-processing the same candle
         key = (pair, timeframe)
