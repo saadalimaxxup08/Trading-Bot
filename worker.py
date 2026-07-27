@@ -26,7 +26,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCHF=X", 
-    "EURGBP=X", "GBPJPY=X", "GC=F", "CL=F", "ETH-USD", "SOL-USD"
+    "EURGBP=X", "GBPJPY=X", "GC=F", "ETH-USD", "SOL-USD"
 ]
 
 # Scaled volatility thresholds lookup - Matches app.py
@@ -39,7 +39,6 @@ ATR_THRESHOLDS = {
     "EURGBP=X": 0.00005,
     "GBPJPY=X": 0.01,
     "GC=F": 0.2,       # Gold Futures
-    "CL=F": 0.1,       # Crude Oil
     "ETH-USD": 1.0,
     "SOL-USD": 0.1     # Solana
 }

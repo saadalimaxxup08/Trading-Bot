@@ -662,7 +662,7 @@ else:
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCHF=X", 
-    "EURGBP=X", "GBPJPY=X", "GC=F", "CL=F", "ETH-USD", "SOL-USD"
+    "EURGBP=X", "GBPJPY=X", "GC=F", "ETH-USD", "SOL-USD"
 ]
 
 # Scaled volatility thresholds lookup
@@ -675,7 +675,6 @@ ATR_THRESHOLDS = {
     "EURGBP=X": 0.00005,
     "GBPJPY=X": 0.01,
     "GC=F": 0.2,       # Gold Futures
-    "CL=F": 0.1,       # Crude Oil
     "ETH-USD": 1.0,
     "SOL-USD": 0.1     # Solana
 }
@@ -1262,13 +1261,10 @@ readable_names = {
     "GBPUSD=X": "GBP/USD",
     "USDJPY=X": "USD/JPY",
     "AUDUSD=X": "AUD/USD",
-    "USDCAD=X": "USD/CAD",
     "USDCHF=X": "USD/CHF",
     "EURGBP=X": "EUR/GBP",
     "GBPJPY=X": "GBP/JPY",
     "GC=F": "GOLD (GC=F)",
-    "CL=F": "Crude Oil (CL=F)",
-    "BTC-USD": "BTC/USD",
     "ETH-USD": "ETH/USD",
     "SOL-USD": "SOL/USD"
 }
