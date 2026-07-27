@@ -224,9 +224,9 @@ def start_background_scanner():
                         if not df_batch.empty:
                             for pair in worker.RADAR_PAIRS:
                                 if len(worker.RADAR_PAIRS) > 1 and pair in df_batch.columns.get_level_values(0):
-                                    df_pair = df_batch[pair].dropna()
+                                    df_pair = df_batch[pair].dropna(subset=['Close'])
                                 else:
-                                    df_pair = df_batch.dropna()
+                                    df_pair = df_batch.dropna(subset=['Close'])
                                 worker.process_market_signals_prefetched(pair, timeframe, df_pair)
                     except Exception as e:
                         print(f"Batch download error for {timeframe}: {e}")
