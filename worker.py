@@ -507,9 +507,13 @@ def process_market_signals(pair, timeframe):
                     closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
                 else:
                     closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
-                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
                 
-                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {alert_time_str}")
+                # Trade Entry Time is when the signal candle ends
+                trade_entry_time_pkt = closed_candle_time_pkt + delta_t
+                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
+                trade_entry_str = trade_entry_time_pkt.strftime("%I:%M %p AST")
+                
+                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
                 
                 # Format and send Telegram notification
                 tg_text = f"🚨 <b>CENTRAL BINARY PRO V3 SIGNAL</b>\n\n" \
@@ -520,7 +524,8 @@ def process_market_signals(pair, timeframe):
                           f"<b>Confirmations:</b> {confirmations}/5\n" \
                           f"<b>Strength:</b> {strength}\n" \
                           f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
-                          f"<b>Time:</b> {alert_time_str}\n\n" \
+                          f"<b>Signal Candle (Closed):</b> {alert_time_str}\n" \
+                          f"<b>👉 Trade Entry Time:</b> <b>{trade_entry_str} (Now!)</b>\n\n" \
                           f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"
                 send_telegram_alert(tg_text)
                 
@@ -613,9 +618,13 @@ def process_market_signals_prefetched(pair, timeframe, df):
                     closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
                 else:
                     closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
-                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
                 
-                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {alert_time_str}")
+                # Trade Entry Time is when the signal candle ends
+                trade_entry_time_pkt = closed_candle_time_pkt + delta_t
+                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
+                trade_entry_str = trade_entry_time_pkt.strftime("%I:%M %p AST")
+                
+                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
                 
                 tg_text = f"🚨 <b>CENTRAL BINARY PRO V3 SIGNAL</b>\n\n" \
                           f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
@@ -625,7 +634,8 @@ def process_market_signals_prefetched(pair, timeframe, df):
                           f"<b>Confirmations:</b> {confirmations}/5\n" \
                           f"<b>Strength:</b> {strength}\n" \
                           f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
-                          f"<b>Time:</b> {alert_time_str}\n\n" \
+                          f"<b>Signal Candle (Closed):</b> {alert_time_str}\n" \
+                          f"<b>👉 Trade Entry Time:</b> <b>{trade_entry_str} (Now!)</b>\n\n" \
                           f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"
                 send_telegram_alert(tg_text)
                 
