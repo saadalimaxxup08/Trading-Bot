@@ -1706,8 +1706,8 @@ with col_center:
             for event in active_news:
                 st.markdown(f"- 🚩 **{event['title']}** ({event['country']}) at **{event['time']}**")
                 
-    # Tab View for Live and Backtest
-    tab_live, tab_backtest = st.tabs(["🔴 LIVE CHARTS & ALERTS", "🧪 SYSTEM BACKTEST"])
+    # Tab View for Live, TradingView and Backtest
+    tab_live, tab_tv, tab_backtest = st.tabs(["📈 STATION CHART (Indicators & Alerts)", "🖥️ TRADINGVIEW WIDGET", "🧪 SYSTEM BACKTEST"])
     
     with tab_live:
         # Download Active Ticker Live Data
@@ -1715,7 +1715,6 @@ with col_center:
         try:
             # df_live has already been downloaded and processed at the top of the pipeline
             if not df_live.empty:
-                
                 closed_candle = df_live.iloc[-2]
                 closed_candle_time = df_live.index[-2]
                 
@@ -1737,72 +1736,166 @@ with col_center:
                     current_radar_info = radar_data.get(active_pair, {"trend": "NEUTRAL", "atr": 0.0})
                     st.metric(label="15m MTF Trend", value=current_radar_info["trend"], delta="Active Pair Trend")
                     
-                # Signal Scanning: Signals are processed centrally by the background worker.
+                # Render Multi-plot Plotly Chart with custom Indicators
+                fig = make_subplots(
+                    rows=4, cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.03,
+                    row_heights=[0.55, 0.15, 0.15, 0.15]
+                )
                 
-                # ----------------- TRADINGVIEW WIDGET RENDER -----------------
-                import streamlit.components.v1 as components
+                # Candlesticks
+                fig.add_trace(
+                    go.Candlestick(
+                        x=df_live.index,
+                        open=df_live['Open'],
+                        high=df_live['High'],
+                        low=df_live['Low'],
+                        close=df_live['Close'],
+                        name="Price"
+                    ),
+                    row=1, col=1
+                )
                 
-                # Map active_pair to TradingView ticker
-                tv_mapping = {
-                    "EURUSD=X": "FX:EURUSD",
-                    "GBPUSD=X": "FX:GBPUSD",
-                    "USDJPY=X": "FX:USDJPY",
-                    "AUDUSD=X": "FX:AUDUSD",
-                    "USDCAD=X": "FX:USDCAD",
-                    "USDCHF=X": "FX:USDCHF",
-                    "EURGBP=X": "FX:EURGBP",
-                    "GBPJPY=X": "FX:GBPJPY",
-                    "BTC-USD": "BINANCE:BTCUSDT",
-                    "ETH-USD": "BINANCE:ETHUSDT",
-                    "SOL-USD": "BINANCE:SOLUSDT",
-                    "GC=F": "OANDA:XAUUSD",
-                    "CL=F": "NYMEX:CL1!"
-                }
-                tv_symbol = tv_mapping.get(active_pair, active_pair)
-                tv_interval = "1" if timeframe == "1m" else ("5" if timeframe == "5m" else "15")
+                if show_emas:
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['EMA_50'], line=dict(color='#ff9800', width=1.5), name="EMA 50"), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['EMA_200'], line=dict(color='#9c27b0', width=2.0), name="EMA 200"), row=1, col=1)
                 
-                html_tv = f"""
-                <div class="tradingview-widget-container" style="height:500px; width:100%;">
-                  <div id="tradingview_chart" style="height:470px; width:100%;"></div>
-                  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-                  <script type="text/javascript">
-                  new TradingView.widget({{
-                    "width": "100%",
-                    "height": 470,
-                    "symbol": "{tv_symbol}",
-                    "interval": "{tv_interval}",
-                    "timezone": "Asia/Riyadh",
-                    "theme": "dark",
-                    "style": "1",
-                    "locale": "en",
-                    "toolbar_bg": "#f1f3f6",
-                    "enable_publishing": false,
-                    "hide_side_toolbar": false,
-                    "allow_symbol_change": false,
-                    "save_image": false,
-                    "container_id": "tradingview_chart",
-                    "studies": [
-                      "MASimple@tv-basicstudies",
-                      "RSI@tv-basicstudies",
-                      "MACD@tv-basicstudies"
-                    ]
-                  }});
-                  </script>
-                </div>
-                """
-                components.html(html_tv, height=500)
+                if show_bb:
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['BB_Upper'], line=dict(color='#1e88e5', width=1, dash='dash'), name="BB Upper"), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['BB_Lower'], line=dict(color='#1e88e5', width=1, dash='dash'), name="BB Lower"), row=1, col=1)
                 
-                # Autorefresh caption
-                if st.session_state.scanning:
-                    st.caption("🔄 Live TradingView Widget Active (Real-Time)")
+                if show_sr:
+                    sup_val = df_live['Support'].iloc[-1]
+                    res_val = df_live['Resistance'].iloc[-1]
+                    fig.add_hline(y=sup_val, line=dict(color='#00e676', width=1, dash='dot'), annotation_text=f"Support: {sup_val:.5f}", row=1, col=1)
+                    fig.add_hline(y=res_val, line=dict(color='#ff1744', width=1, dash='dot'), annotation_text=f"Resistance: {res_val:.5f}", row=1, col=1)
                 
-                # Autorefresh caption (sleep/rerun loop handles updates at the end of the script)
+                # Historical arrows overlay
+                for sig in st.session_state.signal_history:
+                    if sig["pair"] == active_pair and sig["timeframe"] == timeframe:
+                        sig_time = sig["time"]
+                        if sig_time in df_live.index:
+                            price_pt = sig["entry_price"]
+                            if sig["type"] == "CALL":
+                                fig.add_annotation(
+                                    x=sig_time, y=price_pt,
+                                    text="▲ CALL", showarrow=True, arrowhead=1,
+                                    arrowcolor="#00e676", arrowsize=1.5,
+                                    font=dict(color="#00e676", size=12, family="Arial Bold"),
+                                    bgcolor="rgba(11, 30, 20, 0.8)", bordercolor="#00e676", borderwidth=1,
+                                    row=1, col=1
+                                )
+                            else:
+                                fig.add_annotation(
+                                    x=sig_time, y=price_pt,
+                                    text="▼ PUT", showarrow=True, arrowhead=1,
+                                    arrowcolor="#ff1744", arrowsize=1.5,
+                                    font=dict(color="#ff1744", size=12, family="Arial Bold"),
+                                    bgcolor="rgba(30, 11, 11, 0.8)", bordercolor="#ff1744", borderwidth=1,
+                                    row=1, col=1
+                                )
+                
+                # Patterns label Overlay
+                if show_patterns:
+                    pattern_df = df_live[df_live['Pattern_Label'] != ""]
+                    for idx, row in pattern_df.iterrows():
+                        fig.add_annotation(
+                            x=idx, y=row['High'],
+                            text=row['Pattern_Label'],
+                            showarrow=False,
+                            font=dict(color="#facc15", size=9),
+                            yshift=15,
+                            row=1, col=1
+                        )
+                
+                # RSI
+                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['RSI_14'], line=dict(color='#fbc02d', width=1.5), name="RSI"), row=2, col=1)
+                fig.add_hline(y=70, line=dict(color='#ff1744', width=1, dash='dash'), row=2, col=1)
+                fig.add_hline(y=50, line=dict(color='#ffffff', width=0.8, dash='dot'), row=2, col=1)
+                fig.add_hline(y=30, line=dict(color='#00e676', width=1, dash='dash'), row=2, col=1)
+                
+                # MACD
+                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD'], line=dict(color='#29b6f6', width=1.2), name="MACD"), row=3, col=1)
+                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD_Signal'], line=dict(color='#ab47bc', width=1.2), name="Signal"), row=3, col=1)
+                colors_hist = ['#00e676' if val >= 0 else '#ff1744' for val in df_live['MACD_Hist']]
+                fig.add_trace(go.Bar(x=df_live.index, y=df_live['MACD_Hist'], marker_color=colors_hist, name="Hist"), row=3, col=1)
+                
+                # Volume
+                colors_vol = ['#00e676' if close >= open_p else '#ff1744' for close, open_p in zip(df_live['Close'], df_live['Open'])]
+                fig.add_trace(go.Bar(x=df_live.index, y=df_live['Volume'], marker_color=colors_vol, name="Volume"), row=4, col=1)
+                
+                fig.update_layout(
+                    xaxis_rangeslider_visible=False,
+                    height=450,
+                    paper_bgcolor='#0b0e14',
+                    plot_bgcolor='#0e121a',
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                fig.update_xaxes(gridcolor='#1e293b', zerolinecolor='#1e293b')
+                fig.update_yaxes(gridcolor='#1e293b', zerolinecolor='#1e293b')
+                st.plotly_chart(fig, use_container_width=True)
+                
                 if st.session_state.scanning:
                     st.caption("🔄 Auto-refresh active (30s interval)")
             else:
                 st.error("Empty data received for active pair.")
         except Exception as e:
-            st.error(f"Error drawing chart: {e}")
+            st.error(f"Error drawing Plotly chart: {e}")
+            
+    with tab_tv:
+        # Render TradingView Interactive Widget
+        import streamlit.components.v1 as components
+        tv_mapping = {
+            "EURUSD=X": "FX:EURUSD",
+            "GBPUSD=X": "FX:GBPUSD",
+            "USDJPY=X": "FX:USDJPY",
+            "AUDUSD=X": "FX:AUDUSD",
+            "USDCAD=X": "FX:USDCAD",
+            "USDCHF=X": "FX:USDCHF",
+            "EURGBP=X": "FX:EURGBP",
+            "GBPJPY=X": "FX:GBPJPY",
+            "BTC-USD": "BINANCE:BTCUSDT",
+            "ETH-USD": "BINANCE:ETHUSDT",
+            "SOL-USD": "BINANCE:SOLUSDT",
+            "GC=F": "OANDA:XAUUSD",
+            "CL=F": "NYMEX:CL1!"
+        }
+        tv_symbol = tv_mapping.get(active_pair, active_pair)
+        tv_interval = "1" if timeframe == "1m" else ("5" if timeframe == "5m" else "15")
+        
+        html_tv = f"""
+        <div class="tradingview-widget-container" style="height:500px; width:100%;">
+          <div id="tradingview_chart" style="height:470px; width:100%;"></div>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget({{
+            "width": "100%",
+            "height": 470,
+            "symbol": "{tv_symbol}",
+            "interval": "{tv_interval}",
+            "timezone": "Asia/Riyadh",
+            "theme": "dark",
+            "style": "1",
+            "locale": "en",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_side_toolbar": false,
+            "allow_symbol_change": true,
+            "save_image": false,
+            "container_id": "tradingview_chart",
+            "studies": [
+              "MASimple@tv-basicstudies",
+              "RSI@tv-basicstudies",
+              "MACD@tv-basicstudies"
+            ]
+          }});
+          </script>
+        </div>
+        """
+        components.html(html_tv, height=500)
+        st.caption("🖥️ Live TradingView Interactive Chart Widget (Timezone: AST/Jeddah)")
             
     with tab_backtest:
         run_backtest(active_pair, timeframe)
