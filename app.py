@@ -1655,10 +1655,8 @@ st.caption("Auto 15m Trend & ATR Volatility Scanner (Landscape Scroll)")
 
 radar_data = calculate_radar_data()
 if radar_data:
-    # Build a horizontal swipe/scroll layout using custom CSS & HTML
-    html_radar = """
-    <div style="display: flex; overflow-x: auto; gap: 12px; padding: 10px 5px; margin-bottom: 25px; scrollbar-width: thin; -webkit-overflow-scrolling: touch;">
-    """
+    # Build a horizontal swipe/scroll layout using custom CSS & HTML (concatenated without leading spaces to prevent markdown code block parsing)
+    html_radar = '<div style="display: flex; overflow-x: auto; gap: 12px; padding: 10px 5px; margin-bottom: 25px; scrollbar-width: thin; -webkit-overflow-scrolling: touch;">'
     for pair_ticker in RADAR_PAIRS:
         pair_name = pair_ticker.replace("=X", "").replace("-USD", "/USD")
         pair_info = radar_data.get(pair_ticker, {"trend": "NEUTRAL", "status": "WAIT"})
@@ -1673,15 +1671,15 @@ if radar_data:
         trend_text = "🟢 BULLISH" if pair_info["trend"] == "UP" else ("🔴 BEARISH" if pair_info["trend"] == "DOWN" else "⚪ NEUTRAL")
         status_bg = "#15803d" if pair_info["status"] == "TRADE NOW" else "#374151"
         
-        html_radar += f"""
-        <a href="/?pair={pair_ticker}" target="_self" style="text-decoration: none; color: inherit; display: inline-block;">
-            <div style="background-color: {bg_color}; border: 2px solid {border_color}; padding: 12px; border-radius: 8px; min-width: 140px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2); {shadow} transition: transform 0.2s;">
-                <div style="font-weight: bold; font-size: 0.85rem; color: #f8fafc; margin-bottom: 4px;">{pair_name}</div>
-                <div style="font-size: 0.75rem; font-weight: bold; margin-bottom: 8px;">{trend_text}</div>
-                <div style="background-color: {status_bg}; color: #ffffff; font-size: 0.65rem; font-weight: bold; padding: 3px 8px; border-radius: 4px; display: inline-block;">{pair_info["status"]}</div>
-            </div>
-        </a>
-        """
+        card_html = f'<a href="/?pair={pair_ticker}" target="_self" style="text-decoration: none; color: inherit; display: inline-block;">'
+        card_html += f'<div style="background-color: {bg_color}; border: 2px solid {border_color}; padding: 12px; border-radius: 8px; min-width: 140px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2); {shadow} transition: transform 0.2s;">'
+        card_html += f'<div style="font-weight: bold; font-size: 0.85rem; color: #f8fafc; margin-bottom: 4px;">{pair_name}</div>'
+        card_html += f'<div style="font-size: 0.75rem; font-weight: bold; margin-bottom: 8px;">{trend_text}</div>'
+        card_html += f'<div style="background-color: {status_bg}; color: #ffffff; font-size: 0.65rem; font-weight: bold; padding: 3px 8px; border-radius: 4px; display: inline-block;">{pair_info["status"]}</div>'
+        card_html += '</div></a>'
+        
+        html_radar += card_html
+        
     html_radar += "</div>"
     st.markdown(html_radar, unsafe_allow_html=True)
 else:
