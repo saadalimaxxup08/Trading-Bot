@@ -288,6 +288,7 @@ def check_signals(df):
     macd_prev = macd.shift(1)
     signal_prev = signal.shift(1)
     
+    # 1. Triggers (Cross-overs and BB Touches)
     macd_up_cross = (macd_prev <= signal_prev) & (macd > signal)
     macd_down_cross = (macd_prev >= signal_prev) & (macd < signal)
     
@@ -297,38 +298,60 @@ def check_signals(df):
     
     bb_upper_touch = (df['High'].shift(1) >= df['BB_Upper'].shift(1)) | (df['High'] >= df['BB_Upper'])
     bb_upper_recover = df['Close'] < df['Open']
-    bb_put_trigger = bb_upper_touch & bb_put_trigger_val if 'bb_put_trigger_val' in locals() else bb_upper_touch & bb_upper_recover
+    bb_put_trigger = bb_upper_touch & bb_upper_recover
     
+    # 2. Safety Filters (RSI Overbought/Oversold boundaries)
+    # Never CALL if RSI is already overbought (RSI > 65)
+    # Never PUT if RSI is already oversold (RSI < 35)
+    rsi = df['RSI_14']
+    call_safe = rsi < 65
+    put_safe = rsi > 35
+    
+    # 3. Trend Alignment Confirmations
+    # CALL favors price above EMA_50 or EMA_50 > EMA_200
+    ema_trend_call = (df['Close'] > df['EMA_50']) | (df['EMA_50'] > df['EMA_200'])
+    ema_trend_put = (df['Close'] < df['EMA_50']) | (df['EMA_50'] < df['EMA_200'])
+    
+    # 4. Volume Confirmations
     vol = df['Volume']
     vol_prev = vol.shift(1)
+    vol_increasing = vol > vol_prev
     
-    if (vol == 0).all():
-        vol_increasing = pd.Series(True, index=df.index)
-    else:
-        vol_increasing = vol > vol_prev
+    # 5. RSI Room to grow
+    rsi_room_call = rsi < 45
+    rsi_room_put = rsi > 55
+    
+    # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations)
+    call_scores = []
+    put_scores = []
+    
+    for idx in df.index:
+        c_score = 0
+        p_score = 0
         
-    ema_call = df['EMA_50'] > df['EMA_200']
-    rsi_call = df['RSI_14'] > 50
-    
-    ema_put = df['EMA_50'] < df['EMA_200']
-    rsi_put = df['RSI_14'] < 50
-    
-    call_scores = (
-        ema_call.astype(int) + 
-        rsi_call.astype(int) + 
-        macd_up_cross.astype(int) + 
-        bb_call_trigger.astype(int) + 
-        vol_increasing.astype(int)
-    )
-    
-    put_scores = (
-        ema_put.astype(int) + 
-        rsi_put.astype(int) + 
-        macd_down_cross.astype(int) + 
-        bb_put_trigger.astype(int) + 
-        vol_increasing.astype(int)
-    )
-    
+        # CALL SCORE
+        if call_safe[idx] and (macd_up_cross[idx] or bb_call_trigger[idx]):
+            c_score += 2  # Has trigger and is safe
+            if ema_trend_call[idx]:
+                c_score += 1
+            if vol_increasing[idx]:
+                c_score += 1
+            if rsi_room_call[idx]:
+                c_score += 1
+                
+        # PUT SCORE
+        if put_safe[idx] and (macd_down_cross[idx] or bb_put_trigger[idx]):
+            p_score += 2  # Has trigger and is safe
+            if ema_trend_put[idx]:
+                p_score += 1
+            if vol_increasing[idx]:
+                p_score += 1
+            if rsi_room_put[idx]:
+                p_score += 1
+                
+        call_scores.append(c_score)
+        put_scores.append(p_score)
+        
     df['Call_Score'] = call_scores
     df['Put_Score'] = put_scores
     return df
