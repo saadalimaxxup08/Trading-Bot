@@ -1395,6 +1395,28 @@ if st.sidebar.button("💾 Save Telegram Settings", use_container_width=True):
     else:
         st.sidebar.warning("Please fill both Token and Chat ID.")
 
+if st.sidebar.button("🔔 Send Test Message", use_container_width=True):
+    if tg_token and tg_chat_id:
+        with st.sidebar.spinner("Sending test message..."):
+            test_text = "<b>🔔 BINARY PRO SCANNER V3</b>\n\nThis is a test alert to verify your Telegram Bot connection. The bot is working properly! 🟢"
+            url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+            payload = {
+                "chat_id": tg_chat_id,
+                "text": test_text,
+                "parse_mode": "HTML"
+            }
+            try:
+                resp = requests.post(url, json=payload, timeout=10)
+                if resp.status_code == 200:
+                    st.sidebar.success("✅ Test message sent! Check your Telegram.")
+                else:
+                    err_info = resp.json().get("description", resp.text)
+                    st.sidebar.error(f"❌ Telegram Error: {err_info}")
+            except Exception as e:
+                st.sidebar.error(f"❌ Connection Failed: {e}")
+    else:
+        st.sidebar.warning("Please fill both Token and Chat ID to test.")
+
 # Currency Converter Sidebar
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 💱 CURRENCY CONVERTER")
