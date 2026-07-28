@@ -27,6 +27,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Global settings dictionary to share state with background thread
+GLOBAL_SETTINGS = {
+    "session_filter_enabled": True
+}
+
 # Custom premium dark styling
 st.markdown("""
 <style>
@@ -208,6 +213,13 @@ def start_background_scanner():
         last_session_alert_hour = None
         while True:
             try:
+                # Check session filter first (12PM - 12AM PKT)
+                if GLOBAL_SETTINGS.get("session_filter_enabled", True):
+                    session_ok, _ = check_session_filter(True)
+                    if not session_ok:
+                        time.sleep(10.0)
+                        continue
+                        
                 # Reload environment variables in case they were updated via UI/save
                 from dotenv import load_dotenv
                 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -257,25 +269,56 @@ def start_background_scanner():
                                             if pre_sig_type:
                                                 pre_key = (pair, timeframe, live_time)
                                                 if pre_key not in sent_pre_alerts:
-                                                    sent_pre_alerts[pre_key] = True
+                                                    sent_pre_alerts[pre_key] = pre_sig_type
                                                     # Limit size of tracking dictionary
                                                     if len(sent_pre_alerts) > 100:
                                                         sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
                                                     
                                                     # Format and send Pre-Alert to Telegram
+                                                    pre_time_str = datetime.datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%I:%M:%S %p AST")
                                                     pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
-                                                    pre_msg = f"🚨 <b>PRE-ALERT LOADING... 80%</b>\n\n" \
-                                                              f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
-                                                              f"<b>Timeframe:</b> {timeframe}\n" \
+                                                    pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
+                                                              f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                                                               f"<b>Direction:</b> {pre_dir}\n" \
-                                                              f"<b>Final Confirm in:</b> ~20s\n\n" \
-                                                              f"<i>Note: Not Confirmed Yet. Wait for Final Signal.</i>"
+                                                              f"<b>Time:</b> {pre_time_str}\n" \
+                                                              f"<b>Status:</b> Waiting for final 20s confirmation...\n" \
+                                                              f"<b>Note:</b> Ye Final Signal nahi hai. Sirf Alert hai."
                                                     worker.send_telegram_alert(pre_msg)
                                                     print(f"[PRE-ALERT] Sent pre-alert for {pair} {timeframe} {pre_sig_type}")
                                     except Exception as pre_e:
                                         print(f"Pre-alert calculation error: {pre_e}")
                                         
-                                worker.process_market_signals_prefetched(pair, timeframe, df_pair)
+                                # Determine expected closed candle time to evaluate cancel outcome
+                                delta_t = (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15))
+                                last_candle_time = df_pair.index[-1]
+                                last_candle_end = last_candle_time + delta_t
+                                if now_utc >= last_candle_end:
+                                    closed_time = df_pair.index[-1]
+                                else:
+                                    closed_time = df_pair.index[-2]
+                                    
+                                pre_key = (pair, timeframe, closed_time)
+                                
+                                # Process final signal
+                                signal_triggered = worker.process_market_signals_prefetched(pair, timeframe, df_pair)
+                                
+                                # Handle Pre-Alert outcome
+                                if pre_key in sent_pre_alerts:
+                                    pre_dir = sent_pre_alerts[pre_key]
+                                    if signal_triggered:
+                                        # Remove from sent_pre_alerts, final signal notification already sent by worker
+                                        sent_pre_alerts.pop(pre_key, None)
+                                    else:
+                                        # Signal failed to confirm! Send cancel alert
+                                        cancel_time_str = datetime.datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%I:%M:%S %p AST")
+                                        cancel_msg = f"❌ <b>SIGNAL CANCELLED</b>\n\n" \
+                                                     f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                                                     f"<b>Direction:</b> {pre_dir}\n" \
+                                                     f"<b>Time:</b> {cancel_time_str}\n" \
+                                                     f"<b>Reason:</b> Signal Not Perfect. Last confirmation failed.\n" \
+                                                     f"<b>Status:</b> Plan Changed. Waiting for next setup."
+                                        worker.send_telegram_alert(cancel_msg)
+                                        sent_pre_alerts.pop(pre_key, None)
                     except Exception as e:
                         print(f"Batch download error for {timeframe}: {e}")
                     time.sleep(1.0)
@@ -732,16 +775,19 @@ else:
 
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X", "GBPJPY=X"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X"
 ]
 
 # Scaled volatility thresholds lookup
 ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
+    "USDJPY=X": 0.01,
     "AUDUSD=X": 0.00005,
-    "NZDUSD=X": 0.00005,
-    "GBPJPY=X": 0.01
+    "USDCAD=X": 0.00005,
+    "USDCHF=X": 0.00005,
+    "EURGBP=X": 0.00005,
+    "EURJPY=X": 0.01
 }
 
 # ----------------- NEWS FILTER MODULE -----------------
@@ -831,17 +877,17 @@ def check_session_filter(enabled=True):
     if not enabled:
         return True, ""
     
-    pkt = pytz.timezone('Asia/Riyadh')
-    now_pkt = datetime.datetime.now(pkt)
+    pkt_tz = pytz.timezone('Asia/Karachi')
+    now_pkt = datetime.datetime.now(pkt_tz)
     current_time = now_pkt.time()
     
     start_time = datetime.time(12, 0)
-    end_time = datetime.time(23, 0)
+    end_time = datetime.time(23, 59, 59)
     
     in_session = start_time <= current_time <= end_time
-    time_str = now_pkt.strftime("%I:%M %p AST")
+    time_str = now_pkt.strftime("%I:%M %p PKT")
     
-    return in_session, f"Current AST: {time_str} (Bot scans only: 12:00 PM - 11:00 PM AST)"
+    return in_session, f"Current PKT: {time_str} (Bot scans only: 12:00 PM - 12:00 AM PKT)"
 
 # ----------------- TECHNICAL INDICATORS MODULE -----------------
 def calculate_atr(df, period=14):
@@ -1528,7 +1574,8 @@ else:
 
 # Global Settings
 st.sidebar.markdown("---")
-session_filter_enabled = st.sidebar.checkbox("Session Filter (12-23 PKT)", value=False)
+session_filter_enabled = st.sidebar.checkbox("Session Filter (12PM-12AM PKT)", value=True)
+GLOBAL_SETTINGS["session_filter_enabled"] = session_filter_enabled
 news_filter_enabled = st.sidebar.checkbox("News Calendar Filter", value=True)
 volatility_filter_enabled = st.sidebar.checkbox("Volatility ATR Filter", value=True)
 

@@ -25,16 +25,19 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X", "GBPJPY=X"
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X"
 ]
 
 # Scaled volatility thresholds lookup - Matches app.py
 ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
+    "USDJPY=X": 0.01,
     "AUDUSD=X": 0.00005,
-    "NZDUSD=X": 0.00005,
-    "GBPJPY=X": 0.01
+    "USDCAD=X": 0.00005,
+    "USDCHF=X": 0.00005,
+    "EURGBP=X": 0.00005,
+    "EURJPY=X": 0.01
 }
 
 # Scan settings
@@ -706,22 +709,19 @@ def process_market_signals(pair, timeframe):
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
                 
                 # Format and send Telegram notification
-                tg_text = f"🚨 <b>CENTRAL BINARY PRO V4 SNIPER SIGNAL</b>\n\n" \
-                          f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
-                          f"<b>Timeframe:</b> {timeframe}\n" \
-                          f"<b>Type:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
-                          f"<b>Entry Price:</b> {closed_candle['Close']:.5f}\n" \
-                          f"<b>Confirmations:</b> {confirmations}/5\n" \
-                          f"<b>Strength:</b> {strength}\n" \
-                          f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
-                          f"<b>Active Session:</b> {get_active_sessions_string()}\n" \
-                          f"<b>Signal Candle (Closed):</b> {alert_time_str}\n" \
-                          f"<b>👉 Trade Entry Time:</b> <b>{trade_entry_str} (Now!)</b>\n\n" \
-                          f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"
+                tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
+                          f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                          f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
+                          f"<b>Entry Time:</b> {trade_entry_str}\n" \
+                          f"<b>Expiry:</b> {timeframe}\n" \
+                          f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
+                          f"<b>Risk:</b> Low"
                 send_telegram_alert(tg_text)
-                
+                return True
+        return False
     except Exception as e:
         print(f"Error processing market signals for {pair} [{timeframe}]: {e}")
+        return False
 
 def process_market_signals_prefetched(pair, timeframe, df):
     if df.empty:
@@ -829,22 +829,19 @@ def process_market_signals_prefetched(pair, timeframe, df):
                 
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
                 
-                tg_text = f"🚨 <b>CENTRAL BINARY PRO V4 SNIPER SIGNAL</b>\n\n" \
-                          f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
-                          f"<b>Timeframe:</b> {timeframe}\n" \
-                          f"<b>Type:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
-                          f"<b>Entry Price:</b> {closed_candle['Close']:.5f}\n" \
-                          f"<b>Confirmations:</b> {confirmations}/5\n" \
-                          f"<b>Strength:</b> {strength}\n" \
-                          f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
-                          f"<b>Active Session:</b> {get_active_sessions_string()}\n" \
-                          f"<b>Signal Candle (Closed):</b> {alert_time_str}\n" \
-                          f"<b>👉 Trade Entry Time:</b> <b>{trade_entry_str} (Now!)</b>\n\n" \
-                          f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"
+                tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
+                          f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                          f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
+                          f"<b>Entry Time:</b> {trade_entry_str}\n" \
+                          f"<b>Expiry:</b> {timeframe}\n" \
+                          f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
+                          f"<b>Risk:</b> Low"
                 send_telegram_alert(tg_text)
-                
+                return True
+        return False
     except Exception as e:
         print(f"Error prefetched processing for {pair} [{timeframe}]: {e}")
+        return False
 
 def send_hourly_summary():
     if supabase_client is None:
