@@ -43,6 +43,10 @@ ATR_THRESHOLDS = {
 # Scan settings
 TIMEFRAMES = ["5m"]
 
+# Debug Mode tracking variables
+LAST_DEBUG_REPORT_TIME = None
+LAST_SCAN_SCORES = {}
+
 def get_supabase_client():
     if not SUPABASE_URL or "your-project-id" in SUPABASE_URL:
         print("Error: Supabase Credentials not configured in .env")
@@ -662,6 +666,91 @@ def check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
             
     return True
 
+def get_scan_rejection_reason(closed_candle, pair, timeframe):
+    """
+    Evaluates closed_candle step-by-step to identify the exact technical reason why a potential trade was rejected.
+    """
+    call_score = int(closed_candle.get('Call_Score', 0))
+    put_score = int(closed_candle.get('Put_Score', 0))
+    
+    # Determine target direction (prefer higher score candidate, fallback to trigger checks)
+    sig_type = None
+    if call_score > 0 or put_score > 0:
+        sig_type = "CALL" if call_score >= put_score else "PUT"
+    else:
+        # Check if MACD cross or BB triggers occurred but filters wiped them out
+        macd = closed_candle.get('MACD', 0.0)
+        signal = closed_candle.get('MACD_Signal', 0.0)
+        close = closed_candle.get('Close', 0.0)
+        open_val = closed_candle.get('Open', 0.0)
+        low = closed_candle.get('Low', 0.0)
+        high = closed_candle.get('High', 0.0)
+        bb_lower = closed_candle.get('BB_Lower', 0.0)
+        bb_upper = closed_candle.get('BB_Upper', 0.0)
+        
+        # Approximate trigger checks
+        call_trig = (macd > signal) or (low <= bb_lower and close > open_val)
+        put_trig = (macd < signal) or (high >= bb_upper and close < open_val)
+        if call_trig:
+            sig_type = "CALL"
+        elif put_trig:
+            sig_type = "PUT"
+        else:
+            return "SCORE_LOW"
+
+    # Enforce EMA200 slope direction
+    ema_slope = float(closed_candle.get('EMA_200_Slope', 0.0))
+    if sig_type == "CALL" and ema_slope <= 0:
+        return f"EMA200_SLOPE_NEGATIVE_({ema_slope:.7f})"
+    elif sig_type == "PUT" and ema_slope >= 0:
+        return f"EMA200_SLOPE_POSITIVE_({ema_slope:.7f})"
+        
+    # Enforce RSI Strict Zones
+    rsi_val = float(closed_candle.get('RSI_14', 50.0))
+    if sig_type == "CALL" and not (40 <= rsi_val <= 55):
+        return f"RSI_OUT_OF_RANGE_({rsi_val:.2f}_not_in_40-55)"
+    elif sig_type == "PUT" and not (45 <= rsi_val <= 60):
+        return f"RSI_OUT_OF_RANGE_({rsi_val:.2f}_not_in_45-60)"
+        
+    # Enforce ATR news spike block
+    if closed_candle.get('ATR_Spike', False):
+        return "ATR_SPIKE_LIMIT_EXCEEDED"
+        
+    # Enforce Pivot S/R boundaries
+    is_jpy = "JPY" in str(pair)
+    pips_mult = 0.01 if is_jpy else 0.0001
+    ten_pips = 10 * pips_mult
+    bb_lower = float(closed_candle.get('BB_Lower', 0.0))
+    bb_upper = float(closed_candle.get('BB_Upper', 0.0))
+    swing_low = float(closed_candle.get('Swing_Low_20', 0.0))
+    swing_high = float(closed_candle.get('Swing_High_20', 0.0))
+    
+    if sig_type == "CALL":
+        dist = abs(bb_lower - swing_low)
+        if dist > ten_pips:
+            return f"PIVOT_SR_FAILED_(dist:{dist/pips_mult:.1f}pips_limit:10)"
+    else:
+        dist = abs(bb_upper - swing_high)
+        if dist > ten_pips:
+            return f"PIVOT_SR_FAILED_(dist:{dist/pips_mult:.1f}pips_limit:10)"
+            
+    # Enforce MTF Trend Shield (15M check)
+    if timeframe == "5m":
+        if not check_mtf_trend_ok(pair, sig_type):
+            return "MTF_15M_TREND_MISALIGNMENT"
+            
+    # Enforce Candlestick pattern filters
+    pattern = closed_candle.get('Pattern_Label', 'None')
+    if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
+        return f"PATTERN_REVERSED_({pattern})"
+        
+    # If it passed all filters but score is < 4
+    score = call_score if sig_type == "CALL" else put_score
+    if score < 4:
+        return "SCORE_LOW"
+        
+    return "NONE"
+
 def process_market_signals(pair, timeframe):
     lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
     
@@ -699,6 +788,30 @@ def process_market_signals(pair, timeframe):
             closed_candle = df.iloc[-2]
             closed_candle_time = df.index[-2]
         
+        # Determine current PKT time for logging
+        pkt_tz = pytz.timezone("Asia/Karachi")
+        pkt_now = datetime.datetime.now(pkt_tz)
+        pkt_time_str = pkt_now.strftime("%H:%M PKT")
+        
+        session_type = get_session_type(closed_candle_time)
+        session_label = "IN-SESSION" if session_type == "IN-SESSION" else "OFF-SESSION"
+        
+        call_score = int(closed_candle.get('Call_Score', 0))
+        put_score = int(closed_candle.get('Put_Score', 0))
+        max_score = max(call_score, put_score)
+        
+        # Save max score to global dict for debug heartbeat reporting
+        LAST_SCAN_SCORES[pair] = max_score
+        
+        # Determine rejected reason
+        volatility_low = closed_candle.get('Low_Volatility', False)
+        if volatility_low:
+            reason = "LOW_VOLATILITY"
+        else:
+            reason = get_scan_rejection_reason(closed_candle, pair, timeframe)
+            
+        print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {pkt_time_str} - Session: {session_label} - Score: {max_score}/5 - REASON BLOCKED: {reason}")
+
         # Prevent double-processing the same candle
         key = (pair, timeframe)
         if last_processed_candles.get(key) == closed_candle_time:
@@ -1166,6 +1279,21 @@ if __name__ == "__main__":
             
             # Resolve pending items
             resolve_pending_signals()
+            
+            # Check for Debug Mode Telegram Heartbeat
+            debug_mode = os.environ.get("DEBUG_MODE", "FALSE").upper() == "TRUE"
+            if debug_mode:
+                now_time = datetime.datetime.now()
+                if LAST_DEBUG_REPORT_TIME is None or (now_time - LAST_DEBUG_REPORT_TIME).total_seconds() >= 900:
+                    LAST_DEBUG_REPORT_TIME = now_time
+                    three_score_count = sum(1 for p, score in LAST_SCAN_SCORES.items() if score == 3)
+                    pkt_tz = pytz.timezone("Asia/Karachi")
+                    pkt_now = now_time.astimezone(pkt_tz) if now_time.tzinfo else pytz.utc.localize(now_time).astimezone(pkt_tz)
+                    time_pkt_str = pkt_now.strftime("%I:%M %p PKT")
+                    debug_msg = f"ℹ️ <b>Bot Alive - Scanning 8 pairs.</b>\n" \
+                                f"Last scan time: {time_pkt_str}\n" \
+                                f"Signals found with 3/5 score: {three_score_count}"
+                    send_telegram_alert(debug_msg)
             
             # Target 30 second refresh loop
             elapsed = time.time() - loop_start

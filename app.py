@@ -225,6 +225,9 @@ def start_background_scanner():
                 worker.TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
                 worker.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
                 
+                # Print live heartbeat log to console
+                print(f"[HEARTBEAT] Cloud Background Scanner active and scanning 8 pairs - {datetime.datetime.now().strftime('%H:%M:%S')}")
+                
                 # Run the scanning process using high-speed parallel batch downloading
                 for timeframe in ["5m"]:
                     lookback = "2d" if timeframe == "5m" else "5d"
