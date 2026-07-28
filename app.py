@@ -1396,7 +1396,7 @@ else:
 
 # Global Settings
 st.sidebar.markdown("---")
-session_filter_enabled = st.sidebar.checkbox("Session Filter (12-23 PKT)", value=True)
+session_filter_enabled = st.sidebar.checkbox("Session Filter (12-23 PKT)", value=False)
 news_filter_enabled = st.sidebar.checkbox("News Calendar Filter", value=True)
 volatility_filter_enabled = st.sidebar.checkbox("Volatility ATR Filter", value=True)
 
