@@ -163,25 +163,19 @@ def send_daily_summary():
         overall_wl = overall_wins + overall_losses
         overall_winrate = (overall_wins / overall_wl) * 100 if overall_wl > 0 else 0.0
         
+        overall_profit = in_profit + off_profit
+        
         # Build Report Message
         msg = f"📊 <b>DAILY PERFORMANCE REPORT - {date_str}</b>\n\n"
         
         msg += f"<b>--- 🟢 IN-SESSION RESULTS ---</b>\n"
-        msg += f"Time Window: 12:00 PM - 12:00 AM PKT\n"
-        msg += f"Total Signals: {in_total}\n"
-        msg += f"Wins: {in_wins} | Losses: {in_losses}\n"
-        msg += f"Winrate: {in_winrate:.1f}%\n"
-        msg += f"Net Profit: ${in_profit:+.2f}\n\n"
+        msg += f"Time: 12PM-12AM PKT | Signals: {in_total} | Wins: {in_wins} | Losses: {in_losses} | Winrate: {in_winrate:.1f}% | Profit: ${in_profit:+.2f}\n\n"
         
         msg += f"<b>--- 🟡 OFF-SESSION RESULTS ---</b>\n"
-        msg += f"Time Window: 12:00 AM - 12:00 PM PKT\n"
-        msg += f"Total Signals: {off_total}\n"
-        msg += f"Wins: {off_wins} | Losses: {off_losses}\n"
-        msg += f"Winrate: {off_winrate:.1f}%\n"
-        msg += f"Net Profit: ${off_profit:+.2f}\n\n"
+        msg += f"Time: 12AM-12PM PKT | Signals: {off_total} | Wins: {off_wins} | Losses: {off_losses} | Winrate: {off_winrate:.1f}% | Profit: ${off_profit:+.2f}\n\n"
         
         msg += f"<b>--- OVERALL TOTAL ---</b>\n"
-        msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}%"
+        msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}% | Net Profit: ${overall_profit:+.2f}"
         
         send_telegram_alert(msg)
         print(f"[SUMMARY] Daily summary successfully sent at 9:00 PM AST.")
@@ -531,6 +525,62 @@ def save_signal_to_db(sig):
         print(f"Failed to save signal to database: {e}")
         return False
 
+def save_trade_log_to_db(sig, closed_candle, session_type, is_strong_plus_plus):
+    if supabase_client is None:
+        return False
+    try:
+        # Determine logical status values
+        macd_status = "Bullish Cross" if sig["type"] == "CALL" else "Bearish Cross"
+        bollinger_status = "Bounce Lower Band" if sig["type"] == "CALL" else "Bounce Upper Band"
+        
+        # MTF Trend
+        mtf_status = "EMA200 UP" if sig["type"] == "CALL" else "EMA200 DOWN"
+        
+        # Pivot SR
+        swing_low = closed_candle.get('Swing_Low_20', 0.0)
+        swing_high = closed_candle.get('Swing_High_20', 0.0)
+        pivot_sr_status = f"Near Support {swing_low:.5f}" if sig["type"] == "CALL" else f"Near Resistance {swing_high:.5f}"
+        
+        # Expiry minutes
+        expiry_minutes = 15 if is_strong_plus_plus else 5
+        
+        log_data = {
+            "id": sig["id"],
+            "timestamp": sig["time"].isoformat() if hasattr(sig["time"], "isoformat") else str(sig["time"]),
+            "pair": sig["pair"].replace("=X", ""),
+            "direction": sig["type"],
+            "session_type": session_type,
+            "confirmation_score": sig["confirmations"],
+            "macd_status": macd_status,
+            "bollinger_status": bollinger_status,
+            "rsi_value": float(closed_candle.get('RSI_14', 50.0)),
+            "ema200_slope_5m": float(closed_candle.get('EMA_200_Slope', 0.0)),
+            "candle_pattern": closed_candle.get('Pattern_Label', "None") or "None",
+            "mtf_15m_status": mtf_status,
+            "atr_value": float(closed_candle.get('ATR', 0.0)),
+            "pivot_sr_status": pivot_sr_status,
+            "expiry_minutes": expiry_minutes,
+            "result": "PENDING"
+        }
+        
+        supabase_client.table("trade_logs").insert(log_data).execute()
+        print(f"[Autopsy] Successfully saved trade log for signal: {sig['id']}")
+        return True
+    except Exception as e:
+        print(f"[Autopsy Warning] Failed to save trade log: {e}")
+        return False
+
+def update_trade_log_in_db(sig_id, result):
+    if supabase_client is None:
+        return False
+    try:
+        supabase_client.table("trade_logs").update({"result": result}).eq("id", sig_id).execute()
+        print(f"[Autopsy] Successfully updated trade log {sig_id} result to {result}")
+        return True
+    except Exception as e:
+        print(f"[Autopsy Warning] Failed to update trade log: {e}")
+        return False
+
 def update_signal_in_db(sig_id, exit_price, status):
     if supabase_client is None:
         return
@@ -730,6 +780,7 @@ def process_market_signals(pair, timeframe):
             
             success = save_signal_to_db(new_sig)
             if success:
+                save_trade_log_to_db(new_sig, closed_candle, session_type, is_marubozu)
                 # Convert closed_candle_time to Karachi PKT and UTC
                 pkt_tz = pytz.timezone("Asia/Karachi")
                 if closed_candle_time.tzinfo is not None:
@@ -877,6 +928,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
             
             success = save_signal_to_db(new_sig)
             if success:
+                save_trade_log_to_db(new_sig, closed_candle, session_type, is_marubozu)
                 # Convert closed_candle_time to Karachi PKT and UTC
                 pkt_tz = pytz.timezone("Asia/Karachi")
                 if closed_candle_time.tzinfo is not None:
@@ -1055,6 +1107,7 @@ def resolve_pending_signals():
                                 status = "LOSS"
                                 
                         update_signal_in_db(sig["id"], exit_price, status)
+                        update_trade_log_in_db(sig["id"], status)
                         
                         # Expiry description
                         expiry_desc = timeframe
@@ -1082,6 +1135,7 @@ def resolve_pending_signals():
                     elif (now_utc - exit_time_utc).total_seconds() > 3600:
                         # Timeout unresolved old signals to prevent stuck pending items
                         update_signal_in_db(sig["id"], None, "TIE")
+                        update_trade_log_in_db(sig["id"], "TIE")
                         
         except Exception as e:
             print(f"Error resolving pending signals for {pair} [{timeframe}]: {e}")
