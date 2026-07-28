@@ -1233,17 +1233,15 @@ def run_backtest(pair, timeframe):
                     badge_status = "<span class='badge badge-tie'>TIE</span>"
                 strength_color = "#38bdf8" if sig["Strength"] == "STRONG++" else ("#facc15" if sig["Strength"] == "STRONG" else "#94a3b8")
                 
-                html_table += f"""
-                    <tr style="border-bottom: 1px solid #374151;">
-                        <td style="padding: 10px 16px;">{sig["Time"]}</td>
-                        <td style="padding: 10px 16px;">{badge_type}</td>
-                        <td style="padding: 10px 16px; color: {strength_color}; font-weight: 600;">{sig["Strength"]}</td>
-                        <td style="padding: 10px 16px;">{sig["Confirmations"]}</td>
-                        <td style="padding: 10px 16px;">{sig["Entry"]}</td>
-                        <td style="padding: 10px 16px;">{sig["Exit"]}</td>
-                        <td style="padding: 10px 16px;">{badge_status}</td>
-                    </tr>
-                """
+                html_table += f"""<tr style="border-bottom: 1px solid #374151;">
+<td style="padding: 10px 16px;">{sig["Time"]}</td>
+<td style="padding: 10px 16px;">{badge_type}</td>
+<td style="padding: 10px 16px; color: {strength_color}; font-weight: 600;">{sig["Strength"]}</td>
+<td style="padding: 10px 16px;">{sig["Confirmations"]}</td>
+<td style="padding: 10px 16px;">{sig["Entry"]}</td>
+<td style="padding: 10px 16px;">{sig["Exit"]}</td>
+<td style="padding: 10px 16px;">{badge_status}</td>
+</tr>"""
             html_table += "</tbody></table>"
             st.markdown(html_table, unsafe_allow_html=True)
         else:
@@ -1914,14 +1912,12 @@ with col_right:
                         
                     time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
                     
-                    html_right_table += f"""
-                        <tr style="border-bottom: 1px solid #374151;">
-                            <td style="padding: 8px 10px;">{time_str}</td>
-                            <td style="padding: 8px 10px;">{badge_type}</td>
-                            <td style="padding: 8px 10px; font-weight:600;">{sig["confirmations"]}</td>
-                            <td style="padding: 8px 10px;">{badge_status}</td>
-                        </tr>
-                    """
+                    html_right_table += f"""<tr style="border-bottom: 1px solid #374151;">
+<td style="padding: 8px 10px;">{time_str}</td>
+<td style="padding: 8px 10px;">{badge_type}</td>
+<td style="padding: 8px 10px; font-weight:600;">{sig["confirmations"]}</td>
+<td style="padding: 8px 10px;">{badge_status}</td>
+</tr>"""
                 html_right_table += "</tbody></table>"
                 st.markdown(html_right_table, unsafe_allow_html=True)
                 
@@ -2009,14 +2005,12 @@ with col_right:
                     acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
                     acc_color = "#4caf50" if acc >= 60 else ("#ff9800" if acc >= 50 else "#f44336")
                     
-                    html_daily += f"""
-                        <tr style="border-bottom: 1px solid #374151;">
-                            <td style="padding: 8px 10px; font-weight: 600;">{d}</td>
-                            <td style="padding: 8px 10px;">{daily_stats[d]["total"]}</td>
-                            <td style="padding: 8px 10px; color:#a5d6a7;">{w}W <span style="color:#ef9a9a;">{l}L</span></td>
-                            <td style="padding: 8px 10px; font-weight:bold; color:{acc_color};">{acc:.1f}%</td>
-                        </tr>
-                    """
+                    html_daily += f"""<tr style="border-bottom: 1px solid #374151;">
+<td style="padding: 8px 10px; font-weight: 600;">{d}</td>
+<td style="padding: 8px 10px;">{daily_stats[d]["total"]}</td>
+<td style="padding: 8px 10px; color:#a5d6a7;">{w}W <span style="color:#ef9a9a;">{l}L</span></td>
+<td style="padding: 8px 10px; font-weight:bold; color:{acc_color};">{acc:.1f}%</td>
+</tr>"""
                 html_daily += "</tbody></table>"
                 st.markdown(html_daily, unsafe_allow_html=True)
                 st.caption("Showing performance statistics for the last 7 active trading days.")
@@ -2102,14 +2096,12 @@ with col_right:
                     p_clean = p.replace("=X", "").replace("-USD", "/USD")
                     acc_color = "#4caf50" if acc >= 60 else ("#ff9800" if acc >= 50 else "#f44336")
                     
-                    html_pairs += f"""
-                        <tr style="border-bottom: 1px solid #374151;">
-                            <td style="padding: 8px 10px; font-weight: 600;">{p_clean}</td>
-                            <td style="padding: 8px 10px;">{tot}</td>
-                            <td style="padding: 8px 10px; color:#a5d6a7;">{w}W <span style="color:#ef9a9a;">{l}L</span></td>
-                            <td style="padding: 8px 10px; font-weight:bold; color:{acc_color};">{acc:.1f}%</td>
-                        </tr>
-                    """
+                    html_pairs += f"""<tr style="border-bottom: 1px solid #374151;">
+<td style="padding: 8px 10px; font-weight: 600;">{p_clean}</td>
+<td style="padding: 8px 10px;">{tot}</td>
+<td style="padding: 8px 10px; color:#a5d6a7;">{w}W <span style="color:#ef9a9a;">{l}L</span></td>
+<td style="padding: 8px 10px; font-weight:bold; color:{acc_color};">{acc:.1f}%</td>
+</tr>"""
                 html_pairs += "</tbody></table>"
                 st.markdown(html_pairs, unsafe_allow_html=True)
                 st.caption("Sorted by historical accuracy (highest win rate first). Use to spot the most profitable pairs.")
