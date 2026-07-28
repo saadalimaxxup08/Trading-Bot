@@ -213,12 +213,7 @@ def start_background_scanner():
         last_session_alert_hour = None
         while True:
             try:
-                # Check session filter first (12PM - 12AM PKT)
-                if GLOBAL_SETTINGS.get("session_filter_enabled", True):
-                    session_ok, _ = check_session_filter(True)
-                    if not session_ok:
-                        time.sleep(10.0)
-                        continue
+
                         
                 # Reload environment variables in case they were updated via UI/save
                 from dotenv import load_dotenv
@@ -267,19 +262,25 @@ def start_background_scanner():
                                                 pre_sig_type = "PUT"
                                                 
                                             if pre_sig_type:
+                                                pre_session_type = worker.get_session_type(live_time)
+                                                pre_session_label = "🟢 IN-SESSION" if pre_session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+                                                
                                                 pre_key = (pair, timeframe, live_time)
                                                 if pre_key not in sent_pre_alerts:
-                                                    sent_pre_alerts[pre_key] = pre_sig_type
+                                                    sent_pre_alerts[pre_key] = (pre_sig_type, pre_session_label)
                                                     # Limit size of tracking dictionary
                                                     if len(sent_pre_alerts) > 100:
                                                         sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
                                                     
                                                     # Format and send Pre-Alert to Telegram
-                                                    pre_time_str = datetime.datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%I:%M:%S %p AST")
+                                                    now_pkt = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
+                                                    now_utc = now_pkt.astimezone(pytz.utc)
+                                                    pre_time_str = f"{now_pkt.strftime('%I:%M:%S %p PKT')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
                                                     pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
                                                     pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
                                                               f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                                                               f"<b>Direction:</b> {pre_dir}\n" \
+                                                              f"<b>Session:</b> {pre_session_label}\n" \
                                                               f"<b>Time:</b> {pre_time_str}\n" \
                                                               f"<b>Status:</b> Waiting for final 20s confirmation...\n" \
                                                               f"<b>Note:</b> Ye Final Signal nahi hai. Sirf Alert hai."
@@ -304,16 +305,19 @@ def start_background_scanner():
                                 
                                 # Handle Pre-Alert outcome
                                 if pre_key in sent_pre_alerts:
-                                    pre_dir = sent_pre_alerts[pre_key]
+                                    pre_dir, pre_session_label = sent_pre_alerts[pre_key]
                                     if signal_triggered:
                                         # Remove from sent_pre_alerts, final signal notification already sent by worker
                                         sent_pre_alerts.pop(pre_key, None)
                                     else:
                                         # Signal failed to confirm! Send cancel alert
-                                        cancel_time_str = datetime.datetime.now(pytz.timezone("Asia/Riyadh")).strftime("%I:%M:%S %p AST")
+                                        now_pkt = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
+                                        now_utc = now_pkt.astimezone(pytz.utc)
+                                        cancel_time_str = f"{now_pkt.strftime('%I:%M:%S %p PKT')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
                                         cancel_msg = f"❌ <b>SIGNAL CANCELLED</b>\n\n" \
                                                      f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                                                      f"<b>Direction:</b> {pre_dir}\n" \
+                                                     f"<b>Session:</b> {pre_session_label}\n" \
                                                      f"<b>Time:</b> {cancel_time_str}\n" \
                                                      f"<b>Reason:</b> Signal Not Perfect. Last confirmation failed.\n" \
                                                      f"<b>Status:</b> Plan Changed. Waiting for next setup."
@@ -1574,8 +1578,7 @@ else:
 
 # Global Settings
 st.sidebar.markdown("---")
-session_filter_enabled = st.sidebar.checkbox("Session Filter (12PM-12AM PKT)", value=True)
-GLOBAL_SETTINGS["session_filter_enabled"] = session_filter_enabled
+st.sidebar.info("🚀 **DUAL MODE 24/7 ACTIVE**\nBot scans and labels both 🟢 IN-SESSION & 🟡 OFF-SESSION signals.")
 news_filter_enabled = st.sidebar.checkbox("News Calendar Filter", value=True)
 volatility_filter_enabled = st.sidebar.checkbox("Volatility ATR Filter", value=True)
 

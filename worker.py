@@ -129,66 +129,60 @@ def send_daily_summary():
         res = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).order("time", desc=True).execute()
         signals = res.data if res.data else []
         
-        date_str = now_ry.strftime("%Y-%m-%d")
+        date_str = now_ry.strftime("%d/%m/%Y")
         
-        # Calculate Stats
-        stats = {}
-        total_wins = 0
-        total_losses = 0
-        for tf in ["1m", "5m", "15m"]:
-            tf_sigs = [s for s in signals if s["timeframe"] == tf]
-            wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
-            losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
-            ties = sum(1 for s in tf_sigs if s["status"] == "TIE")
-            total_wl = wins + losses
-            winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
-            stats[tf] = {
-                "total": len(tf_sigs),
-                "wins": wins,
-                "losses": losses,
-                "winrate": winrate
-            }
-            total_wins += wins
-            total_losses += losses
-            
-        overall_wl = total_wins + total_losses
-        overall_winrate = (total_wins / overall_wl) * 100 if overall_wl > 0 else 0.0
-        
-        msg = f"📊 <b>DAILY TRADING SUMMARY</b>\n"
-        msg += f"📅 <b>Date:</b> <code>{date_str}</code> (Jeddah Time)\n\n"
-        
-        msg += f"🎯 <b>OVERALL ACCURACY:</b> <b>{overall_winrate:.1f}%</b> ({total_wins}W - {total_losses}L)\n\n"
-        
-        msg += f"⏱️ <b>PERFORMANCE BY TIMEFRAME:</b>\n"
-        for tf in ["1m", "5m", "15m"]:
-            tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
-            msg += f"• <b>{tf_display}:</b> {stats[tf]['wins']}W - {stats[tf]['losses']}L ({stats[tf]['winrate']:.1f}% Accuracy)\n"
-            
-        msg += f"\n📋 <b>TODAY'S SIGNALS LOG (Full Details):</b>\n"
-        if signals:
-            for sig in signals:
-                sig_time_utc = pd.to_datetime(sig["time"])
-                if sig_time_utc.tzinfo is None:
-                    sig_time_utc = pytz.utc.localize(sig_time_utc)
-                sig_time_ry = sig_time_utc.astimezone(tz_ry)
-                time_str = sig_time_ry.strftime("%I:%M %p")
+        # Retroactively classify signals session types if missing
+        for s in signals:
+            if not s.get("session_type"):
+                sig_time = pd.to_datetime(s["time"])
+                s["session_type"] = get_session_type(sig_time)
                 
-                pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
-                
-                status_emoji = "⏳"
-                if sig["status"] == "WIN":
-                    status_emoji = "🟢 WIN"
-                elif sig["status"] == "LOSS":
-                    status_emoji = "🔴 LOSS"
-                elif sig["status"] == "TIE":
-                    status_emoji = "⚪ TIE"
-                    
-                conf_val = sig.get("confirmations", "N/A")
-                strength_val = sig.get("strength", "NORMAL")
-                msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> ({sig['timeframe']}) | {status_emoji} | <i>{conf_val} ({strength_val})</i>\n"
-        else:
-            msg += "<i>No signals generated today.</i>"
-            
+        in_sess_sigs = [s for s in signals if s.get("session_type") == "IN-SESSION"]
+        off_sess_sigs = [s for s in signals if s.get("session_type") == "OFF-SESSION"]
+        
+        # Calculate In-Session Stats
+        in_wins = sum(1 for s in in_sess_sigs if s["status"] == "WIN")
+        in_losses = sum(1 for s in in_sess_sigs if s["status"] in ["LOSS", "TIE"])
+        in_total = len(in_sess_sigs)
+        in_total_wl = in_wins + in_losses
+        in_winrate = (in_wins / in_total_wl) * 100 if in_total_wl > 0 else 0.0
+        in_profit = in_wins * 8.00 + in_losses * -10.00
+        
+        # Calculate Off-Session Stats
+        off_wins = sum(1 for s in off_sess_sigs if s["status"] == "WIN")
+        off_losses = sum(1 for s in off_sess_sigs if s["status"] in ["LOSS", "TIE"])
+        off_total = len(off_sess_sigs)
+        off_total_wl = off_wins + off_losses
+        off_winrate = (off_wins / off_total_wl) * 100 if off_total_wl > 0 else 0.0
+        off_profit = off_wins * 8.00 + off_losses * -10.00
+        
+        # Calculate Overall Stats
+        overall_total = len(signals)
+        overall_wins = in_wins + off_wins
+        overall_losses = in_losses + off_losses
+        overall_wl = overall_wins + overall_losses
+        overall_winrate = (overall_wins / overall_wl) * 100 if overall_wl > 0 else 0.0
+        
+        # Build Report Message
+        msg = f"📊 <b>DAILY PERFORMANCE REPORT - {date_str}</b>\n\n"
+        
+        msg += f"<b>--- 🟢 IN-SESSION RESULTS ---</b>\n"
+        msg += f"Time Window: 12:00 PM - 12:00 AM PKT\n"
+        msg += f"Total Signals: {in_total}\n"
+        msg += f"Wins: {in_wins} | Losses: {in_losses}\n"
+        msg += f"Winrate: {in_winrate:.1f}%\n"
+        msg += f"Net Profit: ${in_profit:+.2f}\n\n"
+        
+        msg += f"<b>--- 🟡 OFF-SESSION RESULTS ---</b>\n"
+        msg += f"Time Window: 12:00 AM - 12:00 PM PKT\n"
+        msg += f"Total Signals: {off_total}\n"
+        msg += f"Wins: {off_wins} | Losses: {off_losses}\n"
+        msg += f"Winrate: {off_winrate:.1f}%\n"
+        msg += f"Net Profit: ${off_profit:+.2f}\n\n"
+        
+        msg += f"<b>--- OVERALL TOTAL ---</b>\n"
+        msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}%"
+        
         send_telegram_alert(msg)
         print(f"[SUMMARY] Daily summary successfully sent at 9:00 PM AST.")
     except Exception as e:
@@ -476,6 +470,27 @@ def generate_diagnostics_string(closed_candle, pair, timeframe, sig_type):
     except Exception as e:
         return f"Error generating diagnostics: {e}"
 
+def get_session_type(time_val):
+    """
+    Checks if time_val (tz-aware or naive) is within 12:00 PM PKT to 12:00 AM PKT
+    (12:00 to 23:59:59 in PKT). Returns 'IN-SESSION' or 'OFF-SESSION'.
+    """
+    import pytz
+    pkt_tz = pytz.timezone('Asia/Karachi')
+    # If naive, assume it is UTC as per standard DB timestamps
+    if time_val.tzinfo is None:
+        time_val_pkt = pytz.utc.localize(time_val).astimezone(pkt_tz)
+    else:
+        time_val_pkt = time_val.astimezone(pkt_tz)
+    
+    current_time = time_val_pkt.time()
+    start_time = datetime.time(12, 0)
+    end_time = datetime.time(23, 59, 59)
+    
+    if start_time <= current_time <= end_time:
+        return "IN-SESSION"
+    return "OFF-SESSION"
+
 def save_signal_to_db(sig):
     if supabase_client is None:
         return False
@@ -499,15 +514,17 @@ def save_signal_to_db(sig):
             "strength": sig["strength"],
             "confirmations": sig["confirmations"],
             "patterns": sig["patterns"],
-            "diagnostics": sig.get("diagnostics", "N/A")
+            "diagnostics": sig.get("diagnostics", "N/A"),
+            "session_type": sig.get("session_type", "IN-SESSION")
         }
         try:
             supabase_client.table("signals").insert(sig_data).execute()
         except Exception as e:
-            # Fallback if diagnostics column does not exist in database schema yet
-            print(f"[DB Warning] Insertion with diagnostics failed, retrying without diagnostics column: {e}")
+            # Fallback if diagnostics or session_type columns do not exist in database schema yet
+            print(f"[DB Warning] Insertion with new columns failed, retrying fallback: {e}")
             sig_data_fallback = sig_data.copy()
             sig_data_fallback.pop("diagnostics", None)
+            sig_data_fallback.pop("session_type", None)
             supabase_client.table("signals").insert(sig_data_fallback).execute()
         return True
     except Exception as e:
@@ -691,6 +708,9 @@ def process_market_signals(pair, timeframe):
             if pattern:
                 strength = "STRONG"
                 
+            session_type = get_session_type(closed_candle_time)
+            session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+
             new_sig = {
                 "id": str(int(time.time())) + f"-{pair}-{timeframe}",
                 "time": closed_candle_time,
@@ -704,7 +724,8 @@ def process_market_signals(pair, timeframe):
                 "strength": strength,
                 "confirmations": f"{confirmations}/5",
                 "patterns": pattern if pattern else "None",
-                "diagnostics": generate_diagnostics_string(closed_candle, pair, timeframe, sig_type)
+                "diagnostics": generate_diagnostics_string(closed_candle, pair, timeframe, sig_type),
+                "session_type": session_type
             }
             
             success = save_signal_to_db(new_sig)
@@ -732,6 +753,7 @@ def process_market_signals(pair, timeframe):
                 tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
                           f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
+                          f"<b>Session:</b> {session_label}\n" \
                           f"<b>Entry Time:</b> {trade_entry_display}\n" \
                           f"<b>Expiry:</b> {expiry_str}\n" \
                           f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
@@ -833,6 +855,9 @@ def process_market_signals_prefetched(pair, timeframe, df):
             if pattern:
                 strength = "STRONG"
                 
+            session_type = get_session_type(closed_candle_time)
+            session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+
             new_sig = {
                 "id": str(int(time.time())) + f"-{pair}-{timeframe}",
                 "time": closed_candle_time,
@@ -846,7 +871,8 @@ def process_market_signals_prefetched(pair, timeframe, df):
                 "strength": strength,
                 "confirmations": f"{confirmations}/5",
                 "patterns": pattern if pattern else "None",
-                "diagnostics": generate_diagnostics_string(closed_candle, pair, timeframe, sig_type)
+                "diagnostics": generate_diagnostics_string(closed_candle, pair, timeframe, sig_type),
+                "session_type": session_type
             }
             
             success = save_signal_to_db(new_sig)
@@ -874,6 +900,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
                 tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
                           f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
+                          f"<b>Session:</b> {session_label}\n" \
                           f"<b>Entry Time:</b> {trade_entry_display}\n" \
                           f"<b>Expiry:</b> {expiry_str}\n" \
                           f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
