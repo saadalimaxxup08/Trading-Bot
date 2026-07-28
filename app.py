@@ -21,7 +21,7 @@ from supabase import create_client, Client, ClientOptions
 
 # Setup page config for a premium wide layout
 st.set_page_config(
-    page_title="Binary Pro Scanner V3 - VIP Trading Station",
+    page_title="Binary Pro Scanner V4 - Sniper Edition",
     layout="wide",
     page_icon="📈",
     initial_sidebar_state="expanded"
@@ -198,6 +198,8 @@ def start_background_scanner():
     import worker
     import pytz
     
+    sent_pre_alerts = {}
+    
     def scanner_thread_func():
         print("[START] 24/7 Cloud Background Scanner Active")
         import datetime
@@ -228,6 +230,51 @@ def start_background_scanner():
                                     df_pair = df_batch[pair].dropna(subset=['Close'])
                                 else:
                                     df_pair = df_batch.dropna(subset=['Close'])
+                                    
+                                # Check if we are in the Pre-Alert window (20 seconds before the candle closes)
+                                now_utc = datetime.datetime.now(pytz.utc)
+                                is_pre_alert_window = False
+                                if timeframe == "5m":
+                                    is_pre_alert_window = (now_utc.minute % 5 == 4) and (40 <= now_utc.second <= 59)
+                                elif timeframe == "15m":
+                                    is_pre_alert_window = (now_utc.minute % 15 == 14) and (40 <= now_utc.second <= 59)
+                                    
+                                if is_pre_alert_window:
+                                    try:
+                                        # Calculate indicators on the live dataframe (includes active candle as the last row)
+                                        df_pre = calculate_indicators(df_pair.copy())
+                                        df_pre = check_signals(df_pre, pair)
+                                        if len(df_pre) >= 1:
+                                            live_row = df_pre.iloc[-1]
+                                            live_time = df_pre.index[-1]
+                                            
+                                            pre_sig_type = None
+                                            if live_row['Call_Score'] >= 4:
+                                                pre_sig_type = "CALL"
+                                            elif live_row['Put_Score'] >= 4:
+                                                pre_sig_type = "PUT"
+                                                
+                                            if pre_sig_type:
+                                                pre_key = (pair, timeframe, live_time)
+                                                if pre_key not in sent_pre_alerts:
+                                                    sent_pre_alerts[pre_key] = True
+                                                    # Limit size of tracking dictionary
+                                                    if len(sent_pre_alerts) > 100:
+                                                        sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
+                                                    
+                                                    # Format and send Pre-Alert to Telegram
+                                                    pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
+                                                    pre_msg = f"🚨 <b>PRE-ALERT LOADING... 80%</b>\n\n" \
+                                                              f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
+                                                              f"<b>Timeframe:</b> {timeframe}\n" \
+                                                              f"<b>Direction:</b> {pre_dir}\n" \
+                                                              f"<b>Final Confirm in:</b> ~20s\n\n" \
+                                                              f"<i>Note: Not Confirmed Yet. Wait for Final Signal.</i>"
+                                                    worker.send_telegram_alert(pre_msg)
+                                                    print(f"[PRE-ALERT] Sent pre-alert for {pair} {timeframe} {pre_sig_type}")
+                                    except Exception as pre_e:
+                                        print(f"Pre-alert calculation error: {pre_e}")
+                                        
                                 worker.process_market_signals_prefetched(pair, timeframe, df_pair)
                     except Exception as e:
                         print(f"Batch download error for {timeframe}: {e}")
@@ -914,10 +961,17 @@ def calculate_indicators(df):
     
     df = calculate_atr(df)
     df = detect_patterns(df)
+    
+    df['EMA_200_Slope'] = df['EMA_200'].diff(periods=1)
+    df['Swing_Low_20'] = df['Low'].rolling(window=20).min()
+    df['Swing_High_20'] = df['High'].rolling(window=20).max()
+    df['Candle_Range'] = (df['High'] - df['Low']).abs()
+    df['ATR_Spike'] = df['Candle_Range'] > (df['ATR'] * 2.5)
+    
     return df
 
 # ----------------- SIGNALS & CONFIRMATIONS MODULE -----------------
-def check_signals(df):
+def check_signals(df, pair=None):
     if len(df) < 50:
         df['Call_Score'] = 0
         df['Put_Score'] = 0
@@ -928,6 +982,7 @@ def check_signals(df):
     macd_prev = macd.shift(1)
     signal_prev = signal.shift(1)
     
+    # 1. Triggers (Cross-overs and BB Touches)
     macd_up_cross = (macd_prev <= signal_prev) & (macd > signal)
     macd_down_cross = (macd_prev >= signal_prev) & (macd < signal)
     
@@ -939,36 +994,96 @@ def check_signals(df):
     bb_upper_recover = df['Close'] < df['Open']
     bb_put_trigger = bb_upper_touch & bb_upper_recover
     
+    # 2. Safety Filters (RSI Overbought/Oversold boundaries)
+    rsi = df['RSI_14']
+    call_safe = (rsi < 65) & (df['Close'] > df['EMA_200'])
+    put_safe = (rsi > 35) & (df['Close'] < df['EMA_200'])
+    
+    # 3. Trend Alignment Confirmations
+    ema_trend_call = (df['Close'] > df['EMA_50']) | (df['EMA_50'] > df['EMA_200'])
+    ema_trend_put = (df['Close'] < df['EMA_50']) | (df['EMA_50'] < df['EMA_200'])
+    
+    # 4. Volume Confirmations
     vol = df['Volume']
     vol_prev = vol.shift(1)
-    
     if (vol == 0).all():
         vol_increasing = pd.Series(True, index=df.index)
     else:
         vol_increasing = vol > vol_prev
+    
+    # 5. RSI Room to grow
+    rsi_room_call = rsi < 45
+    rsi_room_put = rsi > 55
+    
+    # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations + V4 Sniper Filters)
+    call_scores = []
+    put_scores = []
+    
+    for idx in df.index:
+        c_score = 0
+        p_score = 0
         
-    ema_call = df['EMA_50'] > df['EMA_200']
-    rsi_call = df['RSI_14'] > 50
-    
-    ema_put = df['EMA_50'] < df['EMA_200']
-    rsi_put = df['RSI_14'] < 50
-    
-    call_scores = (
-        ema_call.astype(int) + 
-        rsi_call.astype(int) + 
-        macd_up_cross.astype(int) + 
-        bb_call_trigger.astype(int) + 
-        vol_increasing.astype(int)
-    )
-    
-    put_scores = (
-        ema_put.astype(int) + 
-        rsi_put.astype(int) + 
-        macd_down_cross.astype(int) + 
-        bb_put_trigger.astype(int) + 
-        vol_increasing.astype(int)
-    )
-    
+        # Pips multiplier for Pivot filter
+        is_jpy = False
+        if pair and "JPY" in str(pair):
+            is_jpy = True
+        pips_mult = 0.01 if is_jpy else 0.0001
+        ten_pips = 10 * pips_mult
+        
+        # V4 Sniper Filters inputs
+        ema_slope = df.loc[idx, 'EMA_200_Slope'] if 'EMA_200_Slope' in df.columns else 0.0
+        rsi_val = df.loc[idx, 'RSI_14']
+        atr_spike = df.loc[idx, 'ATR_Spike'] if 'ATR_Spike' in df.columns else False
+        swing_low = df.loc[idx, 'Swing_Low_20'] if 'Swing_Low_20' in df.columns else 0.0
+        swing_high = df.loc[idx, 'Swing_High_20'] if 'Swing_High_20' in df.columns else 0.0
+        bb_lower = df.loc[idx, 'BB_Lower']
+        bb_upper = df.loc[idx, 'BB_Upper']
+        
+        # CALL SCORE
+        if call_safe[idx] and (macd_up_cross[idx] or bb_call_trigger[idx]):
+            # Enforce 4 V4 Sniper Filters
+            v4_filters_ok = (
+                (ema_slope > 0) and
+                (40 <= rsi_val <= 55) and
+                (not atr_spike) and
+                (abs(bb_lower - swing_low) <= ten_pips)
+            )
+            
+            if v4_filters_ok:
+                c_score += 2  # Has trigger and passes V4 filters
+                if ema_trend_call[idx]:
+                    c_score += 1
+                if vol_increasing[idx]:
+                    c_score += 1
+                if rsi_room_call[idx]:
+                    c_score += 1
+                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] > df.loc[idx, 'Open']:
+                    c_score += 1
+                
+        # PUT SCORE
+        if put_safe[idx] and (macd_down_cross[idx] or bb_put_trigger[idx]):
+            # Enforce 4 V4 Sniper Filters
+            v4_filters_ok = (
+                (ema_slope < 0) and
+                (45 <= rsi_val <= 60) and
+                (not atr_spike) and
+                (abs(bb_upper - swing_high) <= ten_pips)
+            )
+            
+            if v4_filters_ok:
+                p_score += 2  # Has trigger and passes V4 filters
+                if ema_trend_put[idx]:
+                    p_score += 1
+                if vol_increasing[idx]:
+                    p_score += 1
+                if rsi_room_put[idx]:
+                    p_score += 1
+                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] < df.loc[idx, 'Open']:
+                    p_score += 1
+                    
+        call_scores.append(c_score)
+        put_scores.append(p_score)
+        
     df['Call_Score'] = call_scores
     df['Put_Score'] = put_scores
     return df
@@ -1132,7 +1247,7 @@ def run_backtest(pair, timeframe):
             df.columns = df.columns.get_level_values(0)
             
         df = calculate_indicators(df)
-        df = check_signals(df)
+        df = check_signals(df, pair)
         
         df_15m = yf.download(pair, period=f"{days}d", interval="15m", progress=False)
         if isinstance(df_15m.columns, pd.MultiIndex):
@@ -1331,7 +1446,7 @@ df_live = get_live_data(active_pair, timeframe)
 if not df_live.empty:
     try:
         df_live = calculate_indicators(df_live)
-        df_live = check_signals(df_live)
+        df_live = check_signals(df_live, active_pair)
     except Exception as e:
         st.error(f"Error calculating indicators: {e}")
 else:
@@ -1360,7 +1475,7 @@ if supabase_client is not None and "supabase_user" in st.session_state:
                 trigger_browser_beep()
 
 # Title
-st.title("⚡ BINARY PRO SCANNER V3")
+st.title("⚡ BINARY PRO SCANNER V4 (SNIPER EDITION)")
 st.markdown("### `VIP-LEVEL TRADING STATION` | **ANTI-REPAINT**")
 st.info("🟢 **Centralized Sync Mode:** Dashboard is synchronized with the central 24/7 background worker.")
 
@@ -1474,7 +1589,7 @@ if st.sidebar.button("💾 Save Telegram Settings", use_container_width=True):
 if st.sidebar.button("🔔 Send Test Message", use_container_width=True):
     if tg_token and tg_chat_id:
         with st.sidebar.spinner("Sending test message..."):
-            test_text = "<b>🔔 BINARY PRO SCANNER V3</b>\n\nThis is a test alert to verify your Telegram Bot connection. The bot is working properly! 🟢"
+            test_text = "<b>🔔 BINARY PRO SCANNER V4 (SNIPER EDITION)</b>\n\nThis is a test alert to verify your Telegram Bot connection. The bot is working properly! 🟢"
             url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
             payload = {
                 "chat_id": tg_chat_id,

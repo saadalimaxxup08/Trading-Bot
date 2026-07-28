@@ -309,9 +309,16 @@ def calculate_indicators(df):
     
     df = calculate_atr(df)
     df = detect_patterns(df)
+    
+    df['EMA_200_Slope'] = df['EMA_200'].diff(periods=1)
+    df['Swing_Low_20'] = df['Low'].rolling(window=20).min()
+    df['Swing_High_20'] = df['High'].rolling(window=20).max()
+    df['Candle_Range'] = (df['High'] - df['Low']).abs()
+    df['ATR_Spike'] = df['Candle_Range'] > (df['ATR'] * 2.5)
+    
     return df
 
-def check_signals(df):
+def check_signals(df, pair=None):
     if len(df) < 50:
         df['Call_Score'] = 0
         df['Put_Score'] = 0
@@ -335,14 +342,11 @@ def check_signals(df):
     bb_put_trigger = bb_upper_touch & bb_upper_recover
     
     # 2. Safety Filters (RSI Overbought/Oversold boundaries)
-    # Never CALL if RSI is already overbought (RSI > 65)
-    # Never PUT if RSI is already oversold (RSI < 35)
     rsi = df['RSI_14']
     call_safe = (rsi < 65) & (df['Close'] > df['EMA_200'])
     put_safe = (rsi > 35) & (df['Close'] < df['EMA_200'])
     
     # 3. Trend Alignment Confirmations
-    # CALL favors price above EMA_50 or EMA_50 > EMA_200
     ema_trend_call = (df['Close'] > df['EMA_50']) | (df['EMA_50'] > df['EMA_200'])
     ema_trend_put = (df['Close'] < df['EMA_50']) | (df['EMA_50'] < df['EMA_200'])
     
@@ -355,7 +359,7 @@ def check_signals(df):
     rsi_room_call = rsi < 45
     rsi_room_put = rsi > 55
     
-    # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations)
+    # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations + V4 Sniper Filters)
     call_scores = []
     put_scores = []
     
@@ -363,32 +367,64 @@ def check_signals(df):
         c_score = 0
         p_score = 0
         
+        # Pips multiplier for Pivot filter
+        is_jpy = False
+        if pair and "JPY" in str(pair):
+            is_jpy = True
+        pips_mult = 0.01 if is_jpy else 0.0001
+        ten_pips = 10 * pips_mult
+        
+        # V4 Sniper Filters inputs
+        ema_slope = df.loc[idx, 'EMA_200_Slope'] if 'EMA_200_Slope' in df.columns else 0.0
+        rsi_val = df.loc[idx, 'RSI_14']
+        atr_spike = df.loc[idx, 'ATR_Spike'] if 'ATR_Spike' in df.columns else False
+        swing_low = df.loc[idx, 'Swing_Low_20'] if 'Swing_Low_20' in df.columns else 0.0
+        swing_high = df.loc[idx, 'Swing_High_20'] if 'Swing_High_20' in df.columns else 0.0
+        bb_lower = df.loc[idx, 'BB_Lower']
+        bb_upper = df.loc[idx, 'BB_Upper']
+        
         # CALL SCORE
         if call_safe[idx] and (macd_up_cross[idx] or bb_call_trigger[idx]):
-            c_score += 2  # Has trigger and is safe
-            if ema_trend_call[idx]:
-                c_score += 1
-            if vol_increasing[idx]:
-                c_score += 1
-            if rsi_room_call[idx]:
-                c_score += 1
-            # Bullish Marubozu weighting
-            if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] > df.loc[idx, 'Open']:
-                c_score += 1
+            # Enforce 4 V4 Sniper Filters
+            v4_filters_ok = (
+                (ema_slope > 0) and
+                (40 <= rsi_val <= 55) and
+                (not atr_spike) and
+                (abs(bb_lower - swing_low) <= ten_pips)
+            )
+            
+            if v4_filters_ok:
+                c_score += 2  # Has trigger and passes V4 filters
+                if ema_trend_call[idx]:
+                    c_score += 1
+                if vol_increasing[idx]:
+                    c_score += 1
+                if rsi_room_call[idx]:
+                    c_score += 1
+                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] > df.loc[idx, 'Open']:
+                    c_score += 1
                 
         # PUT SCORE
         if put_safe[idx] and (macd_down_cross[idx] or bb_put_trigger[idx]):
-            p_score += 2  # Has trigger and is safe
-            if ema_trend_put[idx]:
-                p_score += 1
-            if vol_increasing[idx]:
-                p_score += 1
-            if rsi_room_put[idx]:
-                p_score += 1
-            # Bearish Marubozu weighting
-            if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] < df.loc[idx, 'Open']:
-                p_score += 1
-                
+            # Enforce 4 V4 Sniper Filters
+            v4_filters_ok = (
+                (ema_slope < 0) and
+                (45 <= rsi_val <= 60) and
+                (not atr_spike) and
+                (abs(bb_upper - swing_high) <= ten_pips)
+            )
+            
+            if v4_filters_ok:
+                p_score += 2  # Has trigger and passes V4 filters
+                if ema_trend_put[idx]:
+                    p_score += 1
+                if vol_increasing[idx]:
+                    p_score += 1
+                if rsi_room_put[idx]:
+                    p_score += 1
+                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] < df.loc[idx, 'Open']:
+                    p_score += 1
+                    
         call_scores.append(c_score)
         put_scores.append(p_score)
         
@@ -521,6 +557,41 @@ def check_mtf_trend_ok(pair, sig_type):
         print(f"Error checking 15m MTF trend for {pair}: {e}")
         return False
 
+def check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
+    # 1. EMA200 Slope Filter
+    ema_slope = closed_candle.get('EMA_200_Slope', 0.0)
+    if sig_type == "CALL" and ema_slope <= 0:
+        return False
+    if sig_type == "PUT" and ema_slope >= 0:
+        return False
+        
+    # 2. RSI Zone Strict
+    rsi = closed_candle.get('RSI_14', 50.0)
+    if sig_type == "CALL" and not (40 <= rsi <= 55):
+        return False
+    if sig_type == "PUT" and not (45 <= rsi <= 60):
+        return False
+        
+    # 3. ATR Spike Filter
+    if closed_candle.get('ATR_Spike', False):
+        return False
+        
+    # 4. Pivot Level Confirmation
+    pips_mult = 0.01 if "JPY" in pair else 0.0001
+    ten_pips = 10 * pips_mult
+    if sig_type == "CALL":
+        swing_low = closed_candle.get('Swing_Low_20', 0.0)
+        bb_lower = closed_candle.get('BB_Lower', 0.0)
+        if abs(bb_lower - swing_low) > ten_pips:
+            return False
+    elif sig_type == "PUT":
+        swing_high = closed_candle.get('Swing_High_20', 0.0)
+        bb_upper = closed_candle.get('BB_Upper', 0.0)
+        if abs(bb_upper - swing_high) > ten_pips:
+            return False
+            
+    return True
+
 def process_market_signals(pair, timeframe):
     lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
     
@@ -532,7 +603,7 @@ def process_market_signals(pair, timeframe):
             df.columns = df.columns.get_level_values(0)
             
         df = calculate_indicators(df)
-        df = check_signals(df)
+        df = check_signals(df, pair)
         
         if len(df) < 2:
             return
@@ -583,6 +654,10 @@ def process_market_signals(pair, timeframe):
         if sig_type:
             # Enforce MTF Hard Rule for 5m signals
             if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
+                return
+                
+            # Enforce V4 Sniper Filters
+            if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
                 return
                 
             # Expiry selection default is 1 candle
@@ -631,7 +706,7 @@ def process_market_signals(pair, timeframe):
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
                 
                 # Format and send Telegram notification
-                tg_text = f"🚨 <b>CENTRAL BINARY PRO V3 SIGNAL</b>\n\n" \
+                tg_text = f"🚨 <b>CENTRAL BINARY PRO V4 SNIPER SIGNAL</b>\n\n" \
                           f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Timeframe:</b> {timeframe}\n" \
                           f"<b>Type:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
@@ -653,7 +728,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
         return
     try:
         df = calculate_indicators(df)
-        df = check_signals(df)
+        df = check_signals(df, pair)
         
         if len(df) < 2:
             return
@@ -706,6 +781,10 @@ def process_market_signals_prefetched(pair, timeframe, df):
             if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
                 return
                 
+            # Enforce V4 Sniper Filters
+            if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
+                return
+                
             # Expiry selection default is 1 candle
             delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
             exit_time = closed_candle_time + delta_t
@@ -750,7 +829,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
                 
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
                 
-                tg_text = f"🚨 <b>CENTRAL BINARY PRO V3 SIGNAL</b>\n\n" \
+                tg_text = f"🚨 <b>CENTRAL BINARY PRO V4 SNIPER SIGNAL</b>\n\n" \
                           f"<b>Asset:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Timeframe:</b> {timeframe}\n" \
                           f"<b>Type:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
