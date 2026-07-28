@@ -45,7 +45,7 @@ ATR_THRESHOLDS = {
 }
 
 # Scan settings
-TIMEFRAMES = ["5m"]
+TIMEFRAMES = ["5m", "15m"]
 
 def get_supabase_client():
     if not SUPABASE_URL or "your-project-id" in SUPABASE_URL:
@@ -65,6 +65,21 @@ supabase_client = get_supabase_client()
 def send_telegram_alert(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
+        
+    # Automatically split messages exceeding Telegram's 4096 character limit
+    if len(text) > 4000:
+        lines = text.split("\n")
+        current_chunk = ""
+        for line in lines:
+            if len(current_chunk) + len(line) + 1 > 4000:
+                send_telegram_alert(current_chunk)
+                current_chunk = line
+            else:
+                current_chunk += ("\n" if current_chunk else "") + line
+        if current_chunk:
+            send_telegram_alert(current_chunk)
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -127,9 +142,9 @@ def send_daily_summary():
             tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
             msg += f"• <b>{tf_display}:</b> {stats[tf]['wins']}W - {stats[tf]['losses']}L ({stats[tf]['winrate']:.1f}% Accuracy)\n"
             
-        msg += f"\n📋 <b>TODAY'S SIGNALS LOG (Latest 20):</b>\n"
+        msg += f"\n📋 <b>TODAY'S SIGNALS LOG (Full Details):</b>\n"
         if signals:
-            for sig in signals[:20]:
+            for sig in signals:
                 sig_time_utc = pd.to_datetime(sig["time"])
                 if sig_time_utc.tzinfo is None:
                     sig_time_utc = pytz.utc.localize(sig_time_utc)

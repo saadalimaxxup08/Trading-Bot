@@ -216,8 +216,8 @@ def start_background_scanner():
                 worker.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
                 
                 # Run the scanning process using high-speed parallel batch downloading
-                for timeframe in ["5m"]:
-                    lookback = "2d"
+                for timeframe in ["5m", "15m"]:
+                    lookback = "2d" if timeframe == "5m" else "5d"
                     try:
                         # Fetch all tickers in parallel in a single HTTP request (extremely fast)
                         df_batch = yf.download(worker.RADAR_PAIRS, period=lookback, interval=timeframe, group_by="ticker", progress=False, threads=True)
@@ -1286,7 +1286,7 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"5 Minutes": "5m"}
+timeframe_map = {"5 Minutes": "5m", "15 Minutes": "15m"}
 timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=0)
 timeframe = timeframe_map[timeframe_sel]
 
@@ -1949,133 +1949,170 @@ with col_right:
                 st.write("No signals triggered on active pair yet.")
                 
     with tab_overall:
-        st.caption("All-Time Performance & Timeframe Breakdown")
+        st.caption("🏆 SYSTEM PERFORMANCE ANALYTICS")
         
-        # Load all signals across all pairs and timeframes
-        all_signals = fetch_all_signals_from_db(limit=200)
+        # Load up to 500 signals to provide adequate history for filters
+        all_signals = fetch_all_signals_from_db(limit=500)
         
-        with st.container(height=450):
-            if all_signals:
-                # 1. TIMEFRAME STATS BREAKDOWN TABLE
-                stats = {}
-                for tf in ["1m", "5m", "15m"]:
-                    tf_signals = [s for s in all_signals if s["timeframe"] == tf]
-                    wins = sum(1 for s in tf_signals if s["status"] == "WIN")
-                    losses = sum(1 for s in tf_signals if s["status"] == "LOSS")
-                    ties = sum(1 for s in tf_signals if s["status"] == "TIE")
-                    total_wl = wins + losses
-                    winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
-                    stats[tf] = {
-                        "total": len(tf_signals),
-                        "wins": wins,
-                        "losses": losses,
-                        "winrate": winrate
-                    }
+        if not all_signals:
+            st.write("No signals recorded in the database yet.")
+        else:
+            # Create interactive sub-tabs
+            sub_tab_daily, sub_tab_hourly, sub_tab_pairs = st.tabs([
+                "📆 DAILY ACCURACY", 
+                "🕒 HOURLY COMPARISON", 
+                "💱 ACCURACY BY PAIR"
+            ])
+            
+            with sub_tab_daily:
+                # Group by calendar date in Riyadh/Jeddah timezone
+                import collections
+                daily_stats = collections.defaultdict(lambda: {"wins": 0, "losses": 0, "ties": 0, "total": 0})
+                tz_ry = pytz.timezone("Asia/Riyadh")
                 
-                html_stats_table = """
-                <h5 style="margin: 0 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;">⏱️ STATS BY TIMEFRAME</h5>
-                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.75rem; margin-bottom: 15px;">
+                for sig in all_signals:
+                    sig_time = pd.to_datetime(sig["time"])
+                    if sig_time.tzinfo is None:
+                        sig_time = pytz.utc.localize(sig_time)
+                    sig_time_ry = sig_time.astimezone(tz_ry)
+                    date_str = sig_time_ry.strftime("%Y-%m-%d")
+                    
+                    status = sig["status"]
+                    daily_stats[date_str]["total"] += 1
+                    if status == "WIN":
+                        daily_stats[date_str]["wins"] += 1
+                    elif status == "LOSS":
+                        daily_stats[date_str]["losses"] += 1
+                    elif status == "TIE":
+                        daily_stats[date_str]["ties"] += 1
+                
+                # Sort dates descending
+                sorted_dates = sorted(daily_stats.keys(), reverse=True)
+                
+                # Render in a clean table
+                html_daily = """
+                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.8rem; margin-top: 10px;">
                     <thead>
                         <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
-                            <th style="padding: 6px 8px;">TF</th>
-                            <th style="padding: 6px 8px;">Signals</th>
-                            <th style="padding: 6px 8px;">W / L</th>
-                            <th style="padding: 6px 8px;">Accuracy</th>
+                            <th style="padding: 8px 10px;">Date</th>
+                            <th style="padding: 8px 10px;">Signals</th>
+                            <th style="padding: 8px 10px;">Wins - Losses</th>
+                            <th style="padding: 8px 10px;">Accuracy</th>
                         </tr>
                     </thead>
                     <tbody>
                 """
-                for tf in ["1m", "5m", "15m"]:
-                    tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
-                    color_acc = "#4caf50" if stats[tf]["winrate"] >= 60 else ("#ff9800" if stats[tf]["winrate"] >= 40 else "#ff1744")
-                    html_stats_table += f"""
+                for d in sorted_dates[:7]: # Show last 7 active days
+                    w = daily_stats[d]["wins"]
+                    l = daily_stats[d]["losses"]
+                    tot_wl = w + l
+                    acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
+                    acc_color = "#4caf50" if acc >= 60 else ("#ff9800" if acc >= 50 else "#f44336")
+                    
+                    html_daily += f"""
                         <tr style="border-bottom: 1px solid #374151;">
-                            <td style="padding: 6px 8px; font-weight:bold;">{tf_display}</td>
-                            <td style="padding: 6px 8px;">{stats[tf]["total"]}</td>
-                            <td style="padding: 6px 8px; color:#a5d6a7;">{stats[tf]["wins"]}W <span style="color:#ef9a9a;">{stats[tf]["losses"]}L</span></td>
-                            <td style="padding: 6px 8px; font-weight:bold; color:{color_acc};">{stats[tf]["winrate"]:.1f}%</td>
+                            <td style="padding: 8px 10px; font-weight: 600;">{d}</td>
+                            <td style="padding: 8px 10px;">{daily_stats[d]["total"]}</td>
+                            <td style="padding: 8px 10px; color:#a5d6a7;">{w}W <span style="color:#ef9a9a;">{l}L</span></td>
+                            <td style="padding: 8px 10px; font-weight:bold; color:{acc_color};">{acc:.1f}%</td>
                         </tr>
                     """
-                html_stats_table += "</tbody></table>"
-                st.markdown(html_stats_table, unsafe_allow_html=True)
+                html_daily += "</tbody></table>"
+                st.markdown(html_daily, unsafe_allow_html=True)
+                st.caption("Showing performance statistics for the last 7 active trading days.")
+
+            with sub_tab_hourly:
+                # Group by recent hours (1h, 4h, 12h, 24h)
+                import datetime
+                now_utc = datetime.datetime.now(datetime.timezone.utc)
                 
-                # Visual block grid for each timeframe (like calendar blocks)
-                st.markdown("<h5 style='margin: 15px 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;'>📊 VISUAL TRADES FEED</h5>", unsafe_allow_html=True)
+                intervals = {
+                    "Last 1 Hour": datetime.timedelta(hours=1),
+                    "Last 4 Hours": datetime.timedelta(hours=4),
+                    "Last 12 Hours": datetime.timedelta(hours=12),
+                    "Last 24 Hours": datetime.timedelta(hours=24)
+                }
                 
-                for tf in ["1m", "5m", "15m"]:
-                    tf_signals = [s for s in all_signals if s["timeframe"] == tf][:8] # Show latest 8 trades in a compact grid
-                    tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
+                st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                col_h1, col_h2 = st.columns(2)
+                col_h3, col_h4 = st.columns(2)
+                cols = [col_h1, col_h2, col_h3, col_h4]
+                
+                for idx, (label, delta) in enumerate(intervals.items()):
+                    cutoff = now_utc - delta
+                    tf_sigs = []
+                    for sig in all_signals:
+                        sig_time = pd.to_datetime(sig["time"])
+                        if sig_time.tzinfo is None:
+                            sig_time = pytz.utc.localize(sig_time)
+                        if sig_time >= cutoff:
+                            tf_sigs.append(sig)
                     
-                    st.markdown(f"<div style='font-size:0.75rem; font-weight:bold; color:#94a3b8; margin-top:5px;'>⏱️ {tf_display} Feed</div>", unsafe_allow_html=True)
-                    if tf_signals:
-                        html_blocks = '<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; margin-bottom: 15px;">'
-                        for sig in tf_signals:
-                            bg, border, text, status = "#37474f", "#455a64", "#cfd8dc", "TIE"
-                            if sig["status"] == "WIN":
-                                bg, border, text, status = "#1b5e20", "#2e7d32", "#a5d6a7", "WIN"
-                            elif sig["status"] == "LOSS":
-                                bg, border, text, status = "#b71c1c", "#c62828", "#ef9a9a", "LOSS"
-                            elif sig["status"] == "PENDING":
-                                bg, border, text, status = "#e65100", "#f57c00", "#ffe0b2", "PEND"
-                                
-                            time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
-                            pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
-                            
-                            html_blocks += f"""
-                            <div style="background-color: {bg}; color: {text}; border: 1px solid {border}; padding: 6px 8px; border-radius: 6px; font-size: 0.65rem; text-align: center; width: 23%; min-width: 65px; box-sizing: border-box; box-shadow: 0 2px 4px rgba(0,0,0,0.15);">
-                                <div style="font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{pair_clean}</div>
-                                <div style="font-size: 0.55rem; opacity: 0.85;">{time_str}</div>
-                                <div style="font-weight: bold; font-size: 0.6rem; margin-top: 2px;">{status}</div>
-                            </div>
-                            """
-                        html_blocks += "</div>"
-                        st.markdown(html_blocks, unsafe_allow_html=True)
-                    else:
-                        st.markdown("<div style='font-size:0.7rem; color:#64748b; margin-bottom:15px;'>No signals for this timeframe yet.</div>", unsafe_allow_html=True)
+                    w = sum(1 for s in tf_sigs if s["status"] == "WIN")
+                    l = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+                    tot_wl = w + l
+                    acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
+                    
+                    with cols[idx]:
+                        st.metric(
+                            label=label,
+                            value=f"{acc:.1f}%" if tot_wl > 0 else "0.0%",
+                            delta=f"{w}W - {l}L ({len(tf_sigs)} Tot)",
+                            delta_color="normal" if acc >= 60 else "inverse"
+                        )
+                st.caption("Live rolling accuracy filters over the most recent execution windows.")
+
+            with sub_tab_pairs:
+                # Group by asset/pair
+                pair_stats = collections.defaultdict(lambda: {"wins": 0, "losses": 0, "ties": 0, "total": 0})
+                for sig in all_signals:
+                    pair = sig["pair"]
+                    status = sig["status"]
+                    pair_stats[pair]["total"] += 1
+                    if status == "WIN":
+                        pair_stats[pair]["wins"] += 1
+                    elif status == "LOSS":
+                        pair_stats[pair]["losses"] += 1
+                    elif status == "TIE":
+                        pair_stats[pair]["ties"] += 1
                 
-                # 2. LATEST 10 GLOBAL SIGNALS FEED
-                html_global_table = """
-                <h5 style="margin: 15px 0 10px 0; font-size:0.85rem; color:#94a3b8; font-weight:600;">🌍 LATEST GLOBAL SIGNALS</h5>
-                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.75rem;">
+                # Sort pairs by accuracy
+                sorted_pairs = []
+                for p, s in pair_stats.items():
+                    w = s["wins"]
+                    l = s["losses"]
+                    tot_wl = w + l
+                    acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
+                    sorted_pairs.append((p, s["total"], w, l, acc))
+                sorted_pairs.sort(key=lambda x: x[4], reverse=True)
+                
+                html_pairs = """
+                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.8rem; margin-top: 10px;">
                     <thead>
                         <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
-                            <th style="padding: 6px 8px;">Time</th>
-                            <th style="padding: 6px 8px;">Pair</th>
-                            <th style="padding: 6px 8px;">TF</th>
-                            <th style="padding: 6px 8px;">Type</th>
-                            <th style="padding: 6px 8px;">Status</th>
+                            <th style="padding: 8px 10px;">Asset/Pair</th>
+                            <th style="padding: 8px 10px;">Trades</th>
+                            <th style="padding: 8px 10px;">Wins - Losses</th>
+                            <th style="padding: 8px 10px;">Win Rate</th>
                         </tr>
                     </thead>
                     <tbody>
                 """
-                for sig in all_signals[:10]:
-                    badge_type = f"<span class='badge badge-call' style='font-size:0.6rem; padding: 2px 6px;'>CALL</span>" if sig["type"] == "CALL" else f"<span class='badge badge-put' style='font-size:0.6rem; padding: 2px 6px;'>PUT</span>"
-                    badge_status = ""
-                    if sig["status"] == "WIN":
-                        badge_status = "<span class='badge badge-win' style='font-size:0.6rem; padding: 2px 6px;'>WIN</span>"
-                    elif sig["status"] == "LOSS":
-                        badge_status = "<span class='badge badge-loss' style='font-size:0.6rem; padding: 2px 6px;'>LOSS</span>"
-                    elif sig["status"] == "TIE":
-                        badge_status = "<span class='badge badge-tie' style='font-size:0.6rem; padding: 2px 6px;'>TIE</span>"
-                    else:
-                        badge_status = "<span class='badge badge-pending' style='font-size:0.6rem; padding: 2px 6px;'>PEND</span>"
+                for p, tot, w, l, acc in sorted_pairs:
+                    p_clean = p.replace("=X", "").replace("-USD", "/USD")
+                    acc_color = "#4caf50" if acc >= 60 else ("#ff9800" if acc >= 50 else "#f44336")
                     
-                    time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
-                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
-                    
-                    html_global_table += f"""
+                    html_pairs += f"""
                         <tr style="border-bottom: 1px solid #374151;">
-                            <td style="padding: 6px 8px;">{time_str}</td>
-                            <td style="padding: 6px 8px; font-weight:bold;">{pair_clean}</td>
-                            <td style="padding: 6px 8px;">{sig["timeframe"]}</td>
-                            <td style="padding: 6px 8px;">{badge_type}</td>
-                            <td style="padding: 6px 8px;">{badge_status}</td>
+                            <td style="padding: 8px 10px; font-weight: 600;">{p_clean}</td>
+                            <td style="padding: 8px 10px;">{tot}</td>
+                            <td style="padding: 8px 10px; color:#a5d6a7;">{w}W <span style="color:#ef9a9a;">{l}L</span></td>
+                            <td style="padding: 8px 10px; font-weight:bold; color:{acc_color};">{acc:.1f}%</td>
                         </tr>
                     """
-                html_global_table += "</tbody></table>"
-                st.markdown(html_global_table, unsafe_allow_html=True)
-            else:
-                st.write("No historical signals recorded in the database yet.")
+                html_pairs += "</tbody></table>"
+                st.markdown(html_pairs, unsafe_allow_html=True)
+                st.caption("Sorted by historical accuracy (highest win rate first). Use to spot the most profitable pairs.")
 
 # Autorefresh script (30 seconds) using native sleep and rerun to prevent browser reload session loss
 if supabase_client is not None and "supabase_user" in st.session_state and st.session_state.scanning:
