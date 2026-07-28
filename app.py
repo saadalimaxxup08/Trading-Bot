@@ -661,7 +661,7 @@ else:
 
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "AUDUSD=X", "NZDUSD=X",
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "NZDUSD=X",
     "EURGBP=X", "GBPJPY=X", "EURJPY=X", "GC=F", "ETH-USD", "SOL-USD"
 ]
 
@@ -670,7 +670,6 @@ ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
-    "USDCHF=X": 0.00005,
     "AUDUSD=X": 0.00005,
     "NZDUSD=X": 0.00005,
     "EURGBP=X": 0.00005,
@@ -1262,7 +1261,6 @@ readable_names = {
     "EURUSD=X": "EUR/USD",
     "GBPUSD=X": "GBP/USD",
     "USDJPY=X": "USD/JPY",
-    "USDCHF=X": "USD/CHF",
     "AUDUSD=X": "AUD/USD",
     "NZDUSD=X": "NZD/USD",
     "EURGBP=X": "EUR/GBP",
@@ -1403,25 +1401,7 @@ session_filter_enabled = st.sidebar.checkbox("Session Filter (12-23 PKT)", value
 news_filter_enabled = st.sidebar.checkbox("News Calendar Filter", value=True)
 volatility_filter_enabled = st.sidebar.checkbox("Volatility ATR Filter", value=True)
 
-# Risk Manager
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💼 RISK MANAGER")
-st.sidebar.markdown(f"**Daily Limit:** `Max 3 Loss`")
-st.sidebar.markdown(f"**Losses Today:** `{st.session_state.daily_losses} / 3`")
-col_reset_losses, col_clear_db = st.sidebar.columns(2)
-with col_reset_losses:
-    if st.button("♻️ Reset Losses", use_container_width=True):
-        st.session_state.daily_losses = 0
-        st.rerun()
-with col_clear_db:
-    if st.button("🗑️ Clear DB Logs", use_container_width=True, help="Clears historical signals from Supabase database"):
-        if supabase_client is not None:
-            try:
-                supabase_client.table("signals").delete().neq("id", "").execute()
-                st.sidebar.success("Database logs cleared!")
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"Failed to clear: {e}")
+
 
 # Telegram Settings Panel
 st.sidebar.markdown("---")
@@ -1613,31 +1593,7 @@ if "custom_report_ready" in st.session_state and st.session_state.custom_report_
         else:
             st.sidebar.warning("Configure Bot Token & Chat ID first.")
 
-# Currency Converter Sidebar
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💱 CURRENCY CONVERTER")
-c_from = st.sidebar.selectbox("From", ["USD", "EUR", "GBP", "JPY", "CAD", "AUD"])
-c_to = st.sidebar.selectbox("To", ["PKR", "INR", "USD", "EUR", "GBP"])
-c_amount = st.sidebar.number_input("Amount", value=100.0, step=10.0)
 
-if st.sidebar.button("Convert Now"):
-    converted = None
-    if rates:
-        try:
-            converted = rates.convert(c_from, c_to, c_amount)
-        except Exception:
-            pass
-    if converted is None:
-        mock_rates = {
-            ("USD", "PKR"): 278.5, ("EUR", "PKR"): 302.2, ("GBP", "PKR"): 355.0,
-            ("USD", "INR"): 83.5, ("EUR", "INR"): 90.6, ("GBP", "INR"): 106.4,
-            ("EUR", "USD"): 1.09, ("GBP", "USD"): 1.28, ("USD", "JPY"): 155.2
-        }
-        rate = mock_rates.get((c_from, c_to)) or mock_rates.get((c_to, c_from), 1.0)
-        if (c_to, c_from) in mock_rates:
-            rate = 1.0 / rate
-        converted = c_amount * rate
-    st.sidebar.success(f"{c_amount} {c_from} = {converted:.2f} {c_to}")
 
 # Log Out Button
 st.sidebar.markdown("---")

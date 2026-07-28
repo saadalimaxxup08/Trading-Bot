@@ -25,7 +25,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "AUDUSD=X", "NZDUSD=X",
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "NZDUSD=X",
     "EURGBP=X", "GBPJPY=X", "EURJPY=X", "GC=F", "ETH-USD", "SOL-USD"
 ]
 
@@ -34,7 +34,6 @@ ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
-    "USDCHF=X": 0.00005,
     "AUDUSD=X": 0.00005,
     "NZDUSD=X": 0.00005,
     "EURGBP=X": 0.00005,
