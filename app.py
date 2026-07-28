@@ -231,7 +231,7 @@ def start_background_scanner():
                 worker.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
                 
                 # Run the scanning process using high-speed parallel batch downloading
-                for timeframe in ["5m", "15m"]:
+                for timeframe in ["5m"]:
                     lookback = "2d" if timeframe == "5m" else "5d"
                     try:
                         # Fetch all tickers in parallel in a single HTTP request (extremely fast)
@@ -1463,7 +1463,7 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"5 Minutes": "5m", "15 Minutes": "15m"}
+timeframe_map = {"5 Minutes": "5m"}
 timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=0)
 timeframe = timeframe_map[timeframe_sel]
 

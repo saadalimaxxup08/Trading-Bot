@@ -41,7 +41,7 @@ ATR_THRESHOLDS = {
 }
 
 # Scan settings
-TIMEFRAMES = ["5m", "15m"]
+TIMEFRAMES = ["5m"]
 
 def get_supabase_client():
     if not SUPABASE_URL or "your-project-id" in SUPABASE_URL:
@@ -663,14 +663,29 @@ def process_market_signals(pair, timeframe):
             if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
                 return
                 
-            # Expiry selection default is 1 candle
-            delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
-            exit_time = closed_candle_time + delta_t
+            # Expiry selection logic (V4 Sniper Update)
+            is_marubozu = (
+                'Pattern_Marubozu' in closed_candle and 
+                closed_candle['Pattern_Marubozu'] and 
+                (
+                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
+                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
+                )
+            )
+            
+            if is_marubozu:
+                expiry_str = "15 Minutes - STRONG++"
+                expiry_delta = 3 * delta_t
+            else:
+                expiry_str = "5 Minutes"
+                expiry_delta = delta_t
+                
+            exit_time = closed_candle_time + expiry_delta
             
             pattern = closed_candle['Pattern_Label']
             # Skip low-winrate patterns (Doji, Shooting Star, 3 Crows)
             if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
-                return
+                return False
                 
             strength = "NORMAL"
             if pattern:
@@ -694,26 +709,31 @@ def process_market_signals(pair, timeframe):
             
             success = save_signal_to_db(new_sig)
             if success:
-                # Convert closed_candle_time to Riyadh/Jeddah timezone (Asia/Riyadh)
-                pkt_tz = pytz.timezone("Asia/Riyadh")
+                # Convert closed_candle_time to Karachi PKT and UTC
+                pkt_tz = pytz.timezone("Asia/Karachi")
                 if closed_candle_time.tzinfo is not None:
                     closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
                 else:
                     closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
                 
+                closed_candle_time_utc = closed_candle_time_pkt.astimezone(pytz.utc)
+                
                 # Trade Entry Time is when the signal candle ends
                 trade_entry_time_pkt = closed_candle_time_pkt + delta_t
-                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
-                trade_entry_str = trade_entry_time_pkt.strftime("%I:%M %p AST")
+                trade_entry_time_utc = closed_candle_time_utc + delta_t
                 
-                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
+                trade_entry_pkt_str = trade_entry_time_pkt.strftime("%I:%M %p PKT")
+                trade_entry_utc_str = trade_entry_time_utc.strftime("%I:%M %p UTC")
+                trade_entry_display = f"{trade_entry_pkt_str} ({trade_entry_utc_str})"
+                
+                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_display}")
                 
                 # Format and send Telegram notification
                 tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
                           f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
-                          f"<b>Entry Time:</b> {trade_entry_str}\n" \
-                          f"<b>Expiry:</b> {timeframe}\n" \
+                          f"<b>Entry Time:</b> {trade_entry_display}\n" \
+                          f"<b>Expiry:</b> {expiry_str}\n" \
                           f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
                           f"<b>Risk:</b> Low"
                 send_telegram_alert(tg_text)
@@ -785,14 +805,29 @@ def process_market_signals_prefetched(pair, timeframe, df):
             if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
                 return
                 
-            # Expiry selection default is 1 candle
-            delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
-            exit_time = closed_candle_time + delta_t
+            # Expiry selection logic (V4 Sniper Update)
+            is_marubozu = (
+                'Pattern_Marubozu' in closed_candle and 
+                closed_candle['Pattern_Marubozu'] and 
+                (
+                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
+                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
+                )
+            )
+            
+            if is_marubozu:
+                expiry_str = "15 Minutes - STRONG++"
+                expiry_delta = 3 * delta_t
+            else:
+                expiry_str = "5 Minutes"
+                expiry_delta = delta_t
+                
+            exit_time = closed_candle_time + expiry_delta
             
             pattern = closed_candle['Pattern_Label']
             # Skip low-winrate patterns (Doji, Shooting Star, 3 Crows)
             if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
-                return
+                return False
                 
             strength = "NORMAL"
             if pattern:
@@ -816,24 +851,31 @@ def process_market_signals_prefetched(pair, timeframe, df):
             
             success = save_signal_to_db(new_sig)
             if success:
-                pkt_tz = pytz.timezone("Asia/Riyadh")
+                # Convert closed_candle_time to Karachi PKT and UTC
+                pkt_tz = pytz.timezone("Asia/Karachi")
                 if closed_candle_time.tzinfo is not None:
                     closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
                 else:
                     closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
                 
+                closed_candle_time_utc = closed_candle_time_pkt.astimezone(pytz.utc)
+                
                 # Trade Entry Time is when the signal candle ends
                 trade_entry_time_pkt = closed_candle_time_pkt + delta_t
-                alert_time_str = closed_candle_time_pkt.strftime("%I:%M %p AST")
-                trade_entry_str = trade_entry_time_pkt.strftime("%I:%M %p AST")
+                trade_entry_time_utc = closed_candle_time_utc + delta_t
                 
-                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_str}")
+                trade_entry_pkt_str = trade_entry_time_pkt.strftime("%I:%M %p PKT")
+                trade_entry_utc_str = trade_entry_time_utc.strftime("%I:%M %p UTC")
+                trade_entry_display = f"{trade_entry_pkt_str} ({trade_entry_utc_str})"
                 
+                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_display}")
+                
+                # Format and send Telegram notification
                 tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
                           f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
-                          f"<b>Entry Time:</b> {trade_entry_str}\n" \
-                          f"<b>Expiry:</b> {timeframe}\n" \
+                          f"<b>Entry Time:</b> {trade_entry_display}\n" \
+                          f"<b>Expiry:</b> {expiry_str}\n" \
                           f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
                           f"<b>Risk:</b> Low"
                 send_telegram_alert(tg_text)
@@ -903,6 +945,27 @@ def send_hourly_summary():
     except Exception as e:
         print(f"Error generating hourly summary: {e}")
 
+def get_account_balance():
+    balance_file = "account_balance.txt"
+    if os.path.exists(balance_file):
+        try:
+            with open(balance_file, "r") as f:
+                return float(f.read().strip())
+        except Exception:
+            pass
+    return 1000.00
+
+def update_account_balance(change):
+    balance_file = "account_balance.txt"
+    current = get_account_balance()
+    new_balance = current + change
+    try:
+        with open(balance_file, "w") as f:
+            f.write(f"{new_balance:.2f}")
+    except Exception as e:
+        print(f"Failed to save balance: {e}")
+    return new_balance
+
 def resolve_pending_signals():
     pending_signals = fetch_pending_signals()
     if not pending_signals:
@@ -936,8 +999,6 @@ def resolve_pending_signals():
                 exit_time_utc = exit_time_raw.tz_convert(pytz.utc) if exit_time_raw.tzinfo else pytz.utc.localize(exit_time_raw)
                 
                 # Calculate when the exit candle has actually closed
-                # For 5m, a candle with timestamp 03:30 PM AST closes at 03:35 PM AST (exit_time + 5m)
-                # For 15m, a candle with timestamp 03:30 PM AST closes at 03:45 PM AST (exit_time + 15m)
                 delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
                 actual_close_time_utc = exit_time_utc + delta_t
                 
@@ -968,15 +1029,28 @@ def resolve_pending_signals():
                                 
                         update_signal_in_db(sig["id"], exit_price, status)
                         
-                        # Send individual completed signal Telegram notification
-                        status_emoji = "🟢 WIN" if status == "WIN" else ("🔴 LOSS" if status == "LOSS" else "⚪ TIE")
+                        # Expiry description
+                        expiry_desc = timeframe
+                        
+                        # Balance calculations (Stake = $10, Win Payout = +1.80p, Loss = -1.00p)
+                        if status == "WIN":
+                            res_label = "WIN +1.80p"
+                            profit_label = "+$18.00"
+                            balance_change = 8.00  # Payout $18.00 minus $10.00 stake = $8.00 profit
+                        else:
+                            res_label = "LOSS -1.00p"
+                            profit_label = "-$10.00"
+                            balance_change = -10.00
+                            
+                        new_balance = update_account_balance(balance_change)
+                        
+                        # Format and send Telegram Completed Signal alert
                         res_msg = f"🏁 <b>TRADE COMPLETED</b>\n\n" \
-                                  f"<b>Asset:</b> {sig['pair'].replace('=X', '')}\n" \
-                                  f"<b>Timeframe:</b> {sig['timeframe']}\n" \
-                                  f"<b>Type:</b> {sig['type']}\n" \
-                                  f"<b>Result:</b> {status_emoji}\n" \
-                                  f"<b>Entry Price:</b> {entry_price:.5f} | <b>Exit Price:</b> {exit_price:.5f}\n" \
-                                  f"<b>Confirmations:</b> {sig.get('confirmations', 'N/A')} ({sig.get('strength', 'NORMAL')})"
+                                  f"<b>Pair:</b> {sig['pair'].replace('=X', '')}\n" \
+                                  f"<b>Direction:</b> {sig['type']}\n" \
+                                  f"<b>Result:</b> {res_label}\n" \
+                                  f"<b>Profit:</b> {profit_label}\n" \
+                                  f"<b>Balance:</b> ${new_balance:.2f}"
                         send_telegram_alert(res_msg)
                     elif (now_utc - exit_time_utc).total_seconds() > 3600:
                         # Timeout unresolved old signals to prevent stuck pending items
