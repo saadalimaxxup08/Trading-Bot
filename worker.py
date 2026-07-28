@@ -61,6 +61,32 @@ def get_supabase_client():
 
 supabase_client = get_supabase_client()
 
+def get_active_sessions_string():
+    import datetime
+    import pytz
+    pkt = pytz.timezone('Asia/Riyadh')
+    now_pkt = datetime.datetime.now(pkt)
+    current_time = now_pkt.time()
+    
+    active = []
+    # Sydney: 01:00 to 10:00 AST
+    if datetime.time(1, 0) <= current_time <= datetime.time(10, 0):
+        active.append("🇦🇺 Sydney")
+    # Tokyo: 03:00 to 12:00 AST
+    if datetime.time(3, 0) <= current_time <= datetime.time(12, 0):
+        active.append("🇯🇵 Tokyo")
+    # London: 10:00 to 19:00 AST
+    if datetime.time(10, 0) <= current_time <= datetime.time(19, 0):
+        active.append("🇬🇧 London")
+    # New York: 15:00 to 24:00 (12:00 AM) AST
+    if current_time >= datetime.time(15, 0) or current_time < datetime.time(0, 0):
+        if datetime.time(15, 0) <= current_time <= datetime.time(23, 59, 59):
+            active.append("🇺🇸 New York")
+            
+    if not active:
+        return "😴 Market Quiet (No Main Sessions)"
+    return ", ".join(active)
+
 # ----------------- TELEGRAM NOTIFICATIONS -----------------
 def send_telegram_alert(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -618,6 +644,7 @@ def process_market_signals(pair, timeframe):
                           f"<b>Confirmations:</b> {confirmations}/5\n" \
                           f"<b>Strength:</b> {strength}\n" \
                           f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
+                          f"<b>Active Session:</b> {get_active_sessions_string()}\n" \
                           f"<b>Signal Candle (Closed):</b> {alert_time_str}\n" \
                           f"<b>👉 Trade Entry Time:</b> <b>{trade_entry_str} (Now!)</b>\n\n" \
                           f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"
@@ -736,6 +763,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
                           f"<b>Confirmations:</b> {confirmations}/5\n" \
                           f"<b>Strength:</b> {strength}\n" \
                           f"<b>Patterns:</b> {pattern if pattern else 'None'}\n" \
+                          f"<b>Active Session:</b> {get_active_sessions_string()}\n" \
                           f"<b>Signal Candle (Closed):</b> {alert_time_str}\n" \
                           f"<b>👉 Trade Entry Time:</b> <b>{trade_entry_str} (Now!)</b>\n\n" \
                           f"⚠️ <i>Auto Result evaluation will complete on next candles.</i>"

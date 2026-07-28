@@ -203,6 +203,7 @@ def start_background_scanner():
         import datetime
         last_daily_sent_date = None
         last_hourly_sent_hour = None
+        last_session_alert_hour = None
         while True:
             try:
                 # Reload environment variables in case they were updated via UI/save
@@ -249,6 +250,29 @@ def start_background_scanner():
                 if now_ry.hour == 21 and now_ry.minute == 0 and last_daily_sent_date != date_key:
                     worker.send_daily_summary()
                     last_daily_sent_date = date_key
+                
+                # 3. Session Start/End Alerts (at transition hours)
+                if now_ry.minute == 0 and last_session_alert_hour != hour_key:
+                    current_hour = now_ry.hour
+                    session_msg = ""
+                    if current_hour == 1:
+                        session_msg = "🇦🇺 <b>Sydney Session (Australia)</b> has started! Get ready!"
+                    elif current_hour == 3:
+                        session_msg = "🇯🇵 <b>Tokyo Session (Asia)</b> has started! Get ready!"
+                    elif current_hour == 10:
+                        session_msg = "🇬🇧 <b>London Session (Europe)</b> has started! High volatility expected. Get ready!\n🇦🇺 Sydney Session is now closed."
+                    elif current_hour == 12:
+                        session_msg = "🇯🇵 Tokyo Session is now closed."
+                    elif current_hour == 15:
+                        session_msg = "🇺🇸 <b>New York Session (US)</b> has started! Overlap with London active. High volatility expected. Get ready!"
+                    elif current_hour == 19:
+                        session_msg = "🇬🇧 London Session is now closed."
+                    elif current_hour == 0:
+                        session_msg = "🇺🇸 New York Session is now closed."
+                    
+                    if session_msg:
+                        worker.send_telegram_alert(session_msg)
+                    last_session_alert_hour = hour_key
                 
                 time.sleep(10)
             except Exception as e:
