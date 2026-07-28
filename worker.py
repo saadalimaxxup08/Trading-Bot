@@ -386,6 +386,36 @@ def fetch_pending_signals():
         print(f"Failed to fetch pending signals: {e}")
         return []
 
+def generate_diagnostics_string(closed_candle, pair, timeframe, sig_type):
+    try:
+        rsi = float(closed_candle.get('RSI_14', 0))
+        close = float(closed_candle.get('Close', 0))
+        ema200 = float(closed_candle.get('EMA_200', 0))
+        ema50 = float(closed_candle.get('EMA_50', 0))
+        macd = float(closed_candle.get('MACD', 0))
+        macd_sig = float(closed_candle.get('MACD_Signal', 0))
+        bb_upper = float(closed_candle.get('BB_Upper', 0))
+        bb_lower = float(closed_candle.get('BB_Lower', 0))
+        atr = float(closed_candle.get('ATR', 0))
+        
+        bb_dist = close - bb_lower if sig_type == "CALL" else bb_upper - close
+        ema_dist = close - ema200
+        
+        mtf_status = "N/A"
+        if timeframe == "5m":
+            mtf_status = "BULLISH" if check_mtf_trend_ok(pair, "CALL") else ("BEARISH" if check_mtf_trend_ok(pair, "PUT") else "CONSOLIDATING")
+            
+        diag = (
+            f"Type: {sig_type} | Timeframe: {timeframe} | Close: {close:.5f} | "
+            f"RSI: {rsi:.1f} | EMA200: {ema200:.5f} (Dist: {ema_dist:.5f}) | "
+            f"EMA50: {ema50:.5f} | MACD: {macd:.5f}/Sig: {macd_sig:.5f} | "
+            f"BB Upper: {bb_upper:.5f}/BB Lower: {bb_lower:.5f} (Trigger Dist: {bb_dist:.5f}) | "
+            f"ATR: {atr:.5f} | 15m MTF Trend: {mtf_status}"
+        )
+        return diag
+    except Exception as e:
+        return f"Error generating diagnostics: {e}"
+
 def save_signal_to_db(sig):
     if supabase_client is None:
         return False
@@ -408,9 +438,17 @@ def save_signal_to_db(sig):
             "status": sig["status"],
             "strength": sig["strength"],
             "confirmations": sig["confirmations"],
-            "patterns": sig["patterns"]
+            "patterns": sig["patterns"],
+            "diagnostics": sig.get("diagnostics", "N/A")
         }
-        supabase_client.table("signals").insert(sig_data).execute()
+        try:
+            supabase_client.table("signals").insert(sig_data).execute()
+        except Exception as e:
+            # Fallback if diagnostics column does not exist in database schema yet
+            print(f"[DB Warning] Insertion with diagnostics failed, retrying without diagnostics column: {e}")
+            sig_data_fallback = sig_data.copy()
+            sig_data_fallback.pop("diagnostics", None)
+            supabase_client.table("signals").insert(sig_data_fallback).execute()
         return True
     except Exception as e:
         print(f"Failed to save signal to database: {e}")
@@ -551,7 +589,8 @@ def process_market_signals(pair, timeframe):
                 "status": "PENDING",
                 "strength": strength,
                 "confirmations": f"{confirmations}/5",
-                "patterns": pattern if pattern else "None"
+                "patterns": pattern if pattern else "None",
+                "diagnostics": generate_diagnostics_string(closed_candle, pair, timeframe, sig_type)
             }
             
             success = save_signal_to_db(new_sig)
@@ -670,7 +709,8 @@ def process_market_signals_prefetched(pair, timeframe, df):
                 "status": "PENDING",
                 "strength": strength,
                 "confirmations": f"{confirmations}/5",
-                "patterns": pattern if pattern else "None"
+                "patterns": pattern if pattern else "None",
+                "diagnostics": generate_diagnostics_string(closed_candle, pair, timeframe, sig_type)
             }
             
             success = save_signal_to_db(new_sig)

@@ -1878,7 +1878,7 @@ with col_right:
         st.error("🚨 STOP TRADING TODAY! DAILY MAX 3 LOSS REACHED.")
         st.session_state.scanning = False
         
-    tab_active, tab_overall = st.tabs(["🎯 ACTIVE PAIR", "📊 OVERALL ANALYTICS"])
+    tab_active, tab_overall, tab_postmortem = st.tabs(["🎯 ACTIVE PAIR", "📊 OVERALL ANALYTICS", "🔍 POST-MORTEM"])
     
     with tab_active:
         st.caption(f"Signal Audit: {active_pair.replace('=X','')} [{timeframe}]")
@@ -2113,6 +2113,47 @@ with col_right:
                 html_pairs += "</tbody></table>"
                 st.markdown(html_pairs, unsafe_allow_html=True)
                 st.caption("Sorted by historical accuracy (highest win rate first). Use to spot the most profitable pairs.")
+
+    with tab_postmortem:
+        st.caption("🔍 Loss Trades Feature Diagnostics (Post-Mortem Analyzer)")
+        
+        # Filter for completed LOSS signals
+        loss_signals = [s for s in all_signals if s["status"] == "LOSS"] if all_signals else []
+        
+        if not loss_signals:
+            st.success("🎉 No loss trades recorded in the database history!")
+        else:
+            st.warning(f"Found {len(loss_signals)} loss trades. Click any expander to inspect the market indicator states at trigger time.")
+            
+            # Render in a scrollable list
+            with st.container(height=450):
+                for idx, sig in enumerate(loss_signals):
+                    sig_time = pd.to_datetime(sig["time"])
+                    if sig_time.tzinfo is None:
+                        sig_time = pytz.utc.localize(sig_time)
+                    sig_time_ry = sig_time.astimezone(pytz.timezone("Asia/Riyadh"))
+                    time_str = sig_time_ry.strftime("%Y-%m-%d %I:%M %p")
+                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                    
+                    label = f"🔴 {time_str} | {pair_clean} | {sig['type']} ({sig['confirmations']})"
+                    
+                    with st.expander(label, expanded=False):
+                        st.markdown(f"**Trade ID:** `{sig['id']}`")
+                        st.markdown(f"**Entry Price:** `{sig['entry_price']:.5f}`  |  **Exit Price:** `{sig['exit_price']:.5f}`")
+                        st.markdown("---")
+                        st.markdown("**🔬 INDICATOR STATES AT TRIGGER:**")
+                        
+                        diagnostics_raw = sig.get("diagnostics")
+                        if diagnostics_raw and " | " in diagnostics_raw:
+                            parts = diagnostics_raw.split(" | ")
+                            for p in parts:
+                                if ":" in p:
+                                    k, v = p.split(":", 1)
+                                    st.markdown(f"• **{k.strip()}:** `{v.strip()}`")
+                                else:
+                                    st.markdown(f"• {p.strip()}")
+                        else:
+                            st.info("No detailed diagnostics saved for this older signal. Diagnostics logging is only active for new signals generated after this update.")
 
 # Autorefresh script (30 seconds) using native sleep and rerun to prevent browser reload session loss
 if supabase_client is not None and "supabase_user" in st.session_state and st.session_state.scanning:
