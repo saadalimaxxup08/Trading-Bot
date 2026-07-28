@@ -859,7 +859,13 @@ def resolve_pending_signals():
                 exit_time_raw = pd.to_datetime(sig["exit_time"])
                 exit_time_utc = exit_time_raw.tz_convert(pytz.utc) if exit_time_raw.tzinfo else pytz.utc.localize(exit_time_raw)
                 
-                if now_utc > exit_time_utc:
+                # Calculate when the exit candle has actually closed
+                # For 5m, a candle with timestamp 03:30 PM AST closes at 03:35 PM AST (exit_time + 5m)
+                # For 15m, a candle with timestamp 03:30 PM AST closes at 03:45 PM AST (exit_time + 15m)
+                delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
+                actual_close_time_utc = exit_time_utc + delta_t
+                
+                if now_utc > actual_close_time_utc:
                     # Let's locate the closest candle matching exit time in index
                     # Match index by localizing yfinance index to UTC
                     df_utc_index = df.index.tz_convert(pytz.utc) if df.index.tzinfo else df.index.map(pytz.utc.localize)
