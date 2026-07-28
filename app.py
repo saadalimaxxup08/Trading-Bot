@@ -1180,6 +1180,7 @@ def run_backtest(pair, timeframe):
                         losses += 1
                     else:
                         status = "TIE"
+                        losses += 1
                         ties += 1
                         
                 backtest_signals.append({
@@ -1192,8 +1193,8 @@ def run_backtest(pair, timeframe):
                     "Status": status
                 })
                 
-        total = wins + losses + ties
-        winrate = (wins / (wins + losses)) * 100 if (wins + losses) > 0 else 0
+        total = wins + losses
+        winrate = (wins / total) * 100 if total > 0 else 0
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1348,7 +1349,7 @@ st.info("🟢 **Centralized Sync Mode:** Dashboard is synchronized with the cent
 
 # Calculate live session stats
 session_wins = sum(1 for sig in st.session_state.signal_history if sig["status"] == "WIN")
-session_losses = sum(1 for sig in st.session_state.signal_history if sig["status"] == "LOSS")
+session_losses = sum(1 for sig in st.session_state.signal_history if sig["status"] in ["LOSS", "TIE"])
 session_ties = sum(1 for sig in st.session_state.signal_history if sig["status"] == "TIE")
 session_total = session_wins + session_losses
 session_winrate = (session_wins / session_total) * 100 if session_total > 0 else 0.0
@@ -1513,7 +1514,7 @@ if st.sidebar.button("🔍 Generate Summary", use_container_width=True):
                 for tf in ["1m", "5m", "15m"]:
                     tf_sigs = [s for s in signals if s["timeframe"] == tf]
                     wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
-                    losses = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+                    losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
                     total_wl = wins + losses
                     winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
                     stats[tf] = {
@@ -2000,7 +2001,7 @@ with col_right:
                 """
                 for d in sorted_dates[:7]: # Show last 7 active days
                     w = daily_stats[d]["wins"]
-                    l = daily_stats[d]["losses"]
+                    l = daily_stats[d]["losses"] + daily_stats[d]["ties"]
                     tot_wl = w + l
                     acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
                     acc_color = "#4caf50" if acc >= 60 else ("#ff9800" if acc >= 50 else "#f44336")
@@ -2043,7 +2044,7 @@ with col_right:
                             tf_sigs.append(sig)
                     
                     w = sum(1 for s in tf_sigs if s["status"] == "WIN")
-                    l = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+                    l = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
                     tot_wl = w + l
                     acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
                     
@@ -2074,7 +2075,7 @@ with col_right:
                 sorted_pairs = []
                 for p, s in pair_stats.items():
                     w = s["wins"]
-                    l = s["losses"]
+                    l = s["losses"] + s["ties"]
                     tot_wl = w + l
                     acc = (w / tot_wl) * 100 if tot_wl > 0 else 0.0
                     sorted_pairs.append((p, s["total"], w, l, acc))

@@ -116,7 +116,7 @@ def send_daily_summary():
         for tf in ["1m", "5m", "15m"]:
             tf_sigs = [s for s in signals if s["timeframe"] == tf]
             wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
-            losses = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+            losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
             ties = sum(1 for s in tf_sigs if s["status"] == "TIE")
             total_wl = wins + losses
             winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
@@ -770,7 +770,7 @@ def send_hourly_summary():
             tf_sigs = [s for s in signals if s["timeframe"] == tf]
             
             wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
-            losses = sum(1 for s in tf_sigs if s["status"] == "LOSS")
+            losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
             ties = sum(1 for s in tf_sigs if s["status"] == "TIE")
             total_wl = wins + losses
             winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
