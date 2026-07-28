@@ -187,7 +187,9 @@ def send_daily_summary():
                 elif sig["status"] == "TIE":
                     status_emoji = "⚪ TIE"
                     
-                msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> ({sig['timeframe']}) | {status_emoji}\n"
+                conf_val = sig.get("confirmations", "N/A")
+                strength_val = sig.get("strength", "NORMAL")
+                msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> ({sig['timeframe']}) | {status_emoji} | <i>{conf_val} ({strength_val})</i>\n"
         else:
             msg += "<i>No signals generated today.</i>"
             
@@ -820,7 +822,9 @@ def send_hourly_summary():
                         status_emoji = "🔴 LOSS"
                     elif sig["status"] == "TIE":
                         status_emoji = "⚪ TIE"
-                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji}\n"
+                    conf_val = sig.get("confirmations", "N/A")
+                    strength_val = sig.get("strength", "NORMAL")
+                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val})</i>\n"
             else:
                 msg += "<i>No trades triggered.</i>\n"
             msg += "\n"
@@ -888,6 +892,17 @@ def resolve_pending_signals():
                                 status = "LOSS"
                                 
                         update_signal_in_db(sig["id"], exit_price, status)
+                        
+                        # Send individual completed signal Telegram notification
+                        status_emoji = "🟢 WIN" if status == "WIN" else ("🔴 LOSS" if status == "LOSS" else "⚪ TIE")
+                        res_msg = f"🏁 <b>TRADE COMPLETED</b>\n\n" \
+                                  f"<b>Asset:</b> {sig['pair'].replace('=X', '')}\n" \
+                                  f"<b>Timeframe:</b> {sig['timeframe']}\n" \
+                                  f"<b>Type:</b> {sig['type']}\n" \
+                                  f"<b>Result:</b> {status_emoji}\n" \
+                                  f"<b>Entry Price:</b> {entry_price:.5f} | <b>Exit Price:</b> {exit_price:.5f}\n" \
+                                  f"<b>Confirmations:</b> {sig.get('confirmations', 'N/A')} ({sig.get('strength', 'NORMAL')})"
+                        send_telegram_alert(res_msg)
                     elif (now_utc - exit_time_utc).total_seconds() > 3600:
                         # Timeout unresolved old signals to prevent stuck pending items
                         update_signal_in_db(sig["id"], None, "TIE")
