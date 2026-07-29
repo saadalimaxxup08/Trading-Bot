@@ -258,10 +258,13 @@ def start_background_scanner():
                                             live_row = df_pre.iloc[-1]
                                             live_time = df_pre.index[-1]
                                             
+                                            # Determine pre-alert score threshold based on pair Tier
+                                            min_pre_score = 3 if pair in TIER_1_PAIRS else 4
+                                            
                                             pre_sig_type = None
-                                            if live_row['Call_Score'] >= 4:
+                                            if live_row['Call_Score'] >= min_pre_score:
                                                 pre_sig_type = "CALL"
-                                            elif live_row['Put_Score'] >= 4:
+                                            elif live_row['Put_Score'] >= min_pre_score:
                                                 pre_sig_type = "PUT"
                                                 
                                             if pre_sig_type:
@@ -784,6 +787,10 @@ else:
 RADAR_PAIRS = [
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X"
 ]
+
+# Tier-Based Pair Matrix
+TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
+TIER_2_PAIRS = ["USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X"]
 
 # Scaled volatility thresholds lookup
 ATR_THRESHOLDS = {
@@ -1328,10 +1335,13 @@ def run_backtest(pair, timeframe):
             sig_type = None
             confirmations = 0
             
-            if row['Call_Score'] >= 5:
+            # Determine score threshold based on pair Tier
+            min_score = 4 if pair in TIER_1_PAIRS else 5
+            
+            if row['Call_Score'] >= min_score:
                 sig_type = "CALL"
                 confirmations = row['Call_Score']
-            elif row['Put_Score'] >= 5:
+            elif row['Put_Score'] >= min_score:
                 sig_type = "PUT"
                 confirmations = row['Put_Score']
                 

@@ -28,6 +28,10 @@ RADAR_PAIRS = [
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X"
 ]
 
+# Tier-Based Pair Matrix
+TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
+TIER_2_PAIRS = ["USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X"]
+
 # Scaled volatility thresholds lookup - Matches app.py
 ATR_THRESHOLDS = {
     "EURUSD=X": 0.00005,
@@ -886,10 +890,13 @@ def process_market_signals(pair, timeframe):
         sig_type = None
         confirmations = 0
         
-        if closed_candle['Call_Score'] >= 5:
+        # Determine score threshold based on pair Tier
+        min_score = 4 if pair in TIER_1_PAIRS else 5
+        
+        if closed_candle['Call_Score'] >= min_score:
             sig_type = "CALL"
             confirmations = closed_candle['Call_Score']
-        elif closed_candle['Put_Score'] >= 5:
+        elif closed_candle['Put_Score'] >= min_score:
             sig_type = "PUT"
             confirmations = closed_candle['Put_Score']
             
@@ -1034,10 +1041,13 @@ def process_market_signals_prefetched(pair, timeframe, df):
         sig_type = None
         confirmations = 0
         
-        if closed_candle['Call_Score'] >= 5:
+        # Determine score threshold based on pair Tier
+        min_score = 4 if pair in TIER_1_PAIRS else 5
+        
+        if closed_candle['Call_Score'] >= min_score:
             sig_type = "CALL"
             confirmations = closed_candle['Call_Score']
-        elif closed_candle['Put_Score'] >= 5:
+        elif closed_candle['Put_Score'] >= min_score:
             sig_type = "PUT"
             confirmations = closed_candle['Put_Score']
             
