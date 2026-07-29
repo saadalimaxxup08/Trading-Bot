@@ -179,8 +179,63 @@ def send_daily_summary():
         msg += f"Time: 12AM-12PM PKT | Signals: {off_total} | Wins: {off_wins} | Losses: {off_losses} | Winrate: {off_winrate:.1f}% | Profit: ${off_profit:+.2f}\n\n"
         
         msg += f"<b>--- OVERALL TOTAL ---</b>\n"
-        msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}% | Net Profit: ${overall_profit:+.2f}"
+        msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}% | Net Profit: ${overall_profit:+.2f}\n\n"
         
+        # Append today's trades list
+        msg += f"<b>--- 📋 TODAY'S SIGNALS LIST ---</b>\n"
+        if signals:
+            msg += "<b>🟢 IN-SESSION:</b>\n"
+            if in_sess_sigs:
+                for sig in in_sess_sigs:
+                    sig_time_utc = pd.to_datetime(sig["time"])
+                    if sig_time_utc.tzinfo is None:
+                        sig_time_utc = pytz.utc.localize(sig_time_utc)
+                    sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                    time_str = sig_time_ry.strftime("%I:%M %p")
+                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                    
+                    status_emoji = "⏳"
+                    if sig["status"] == "WIN":
+                        status_emoji = "🟢 WIN"
+                    elif sig["status"] == "LOSS":
+                        status_emoji = "🔴 LOSS"
+                    elif sig["status"] == "TIE":
+                        status_emoji = "⚪ TIE"
+                    
+                    conf_val = sig.get("confirmations", "N/A")
+                    strength_val = sig.get("strength", "NORMAL")
+                    expiry_val = "15m Exp" if strength_val == "STRONG" else "5m Exp"
+                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
+            else:
+                msg += "<i>No in-session trades triggered.</i>\n"
+                
+            msg += "\n<b>🟡 OFF-SESSION:</b>\n"
+            if off_sess_sigs:
+                for sig in off_sess_sigs:
+                    sig_time_utc = pd.to_datetime(sig["time"])
+                    if sig_time_utc.tzinfo is None:
+                        sig_time_utc = pytz.utc.localize(sig_time_utc)
+                    sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                    time_str = sig_time_ry.strftime("%I:%M %p")
+                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                    
+                    status_emoji = "⏳"
+                    if sig["status"] == "WIN":
+                        status_emoji = "🟢 WIN"
+                    elif sig["status"] == "LOSS":
+                        status_emoji = "🔴 LOSS"
+                    elif sig["status"] == "TIE":
+                        status_emoji = "⚪ TIE"
+                    
+                    conf_val = sig.get("confirmations", "N/A")
+                    strength_val = sig.get("strength", "NORMAL")
+                    expiry_val = "15m Exp" if strength_val == "STRONG" else "5m Exp"
+                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
+            else:
+                msg += "<i>No off-session trades triggered.</i>\n"
+        else:
+            msg += "<i>No trades triggered today.</i>\n"
+            
         send_telegram_alert(msg)
         print(f"[SUMMARY] Daily summary successfully sent at 9:00 PM AST.")
     except Exception as e:
