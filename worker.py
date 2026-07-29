@@ -1131,7 +1131,8 @@ def send_hourly_summary():
                         status_emoji = "⚪ TIE"
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
-                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val})</i>\n"
+                    expiry_val = "15m Exp" if strength_val == "STRONG" else "5m Exp"
+                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No trades triggered.</i>\n"
             msg += "\n"
