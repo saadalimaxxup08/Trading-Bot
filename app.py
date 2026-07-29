@@ -1093,7 +1093,7 @@ def check_signals(df, pair=None):
         bb_upper = df.loc[idx, 'BB_Upper']
         
         # CALL SCORE
-        if call_safe[idx] and (macd_up_cross[idx] or bb_call_trigger[idx]):
+        if call_safe[idx] and macd_up_cross[idx]:
             # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope > 0) and
@@ -1104,6 +1104,8 @@ def check_signals(df, pair=None):
             
             if v4_filters_ok:
                 c_score += 2  # Has trigger and passes V4 filters
+                if bb_call_trigger[idx]:
+                    c_score += 1
                 if ema_trend_call[idx]:
                     c_score += 1
                 if vol_increasing[idx]:
@@ -1114,7 +1116,7 @@ def check_signals(df, pair=None):
                     c_score += 1
                 
         # PUT SCORE
-        if put_safe[idx] and (macd_down_cross[idx] or bb_put_trigger[idx]):
+        if put_safe[idx] and macd_down_cross[idx]:
             # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope < 0) and
@@ -1125,6 +1127,8 @@ def check_signals(df, pair=None):
             
             if v4_filters_ok:
                 p_score += 2  # Has trigger and passes V4 filters
+                if bb_put_trigger[idx]:
+                    p_score += 1
                 if ema_trend_put[idx]:
                     p_score += 1
                 if vol_increasing[idx]:
@@ -1324,10 +1328,10 @@ def run_backtest(pair, timeframe):
             sig_type = None
             confirmations = 0
             
-            if row['Call_Score'] >= 4:
+            if row['Call_Score'] >= 5:
                 sig_type = "CALL"
                 confirmations = row['Call_Score']
-            elif row['Put_Score'] >= 4:
+            elif row['Put_Score'] >= 5:
                 sig_type = "PUT"
                 confirmations = row['Put_Score']
                 
