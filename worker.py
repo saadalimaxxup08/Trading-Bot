@@ -45,7 +45,7 @@ ATR_THRESHOLDS = {
 }
 
 # Scan settings
-TIMEFRAMES = ["5m"]
+TIMEFRAMES = ["15m"]
 
 # Debug Mode tracking variables
 LAST_DEBUG_REPORT_TIME = None
@@ -208,7 +208,7 @@ def send_daily_summary():
                     
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
-                    expiry_val = "15m Exp" if strength_val == "STRONG" else "5m Exp"
+                    expiry_val = "15m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No in-session trades triggered.</i>\n"
@@ -233,7 +233,7 @@ def send_daily_summary():
                     
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
-                    expiry_val = "15m Exp" if strength_val == "STRONG" else "5m Exp"
+                    expiry_val = "15m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No off-session trades triggered.</i>\n"
@@ -437,8 +437,8 @@ def check_signals(df, pair=None):
         bb_lower = df.loc[idx, 'BB_Lower']
         bb_upper = df.loc[idx, 'BB_Upper']
         
-        # CALL SCORE
-        if call_safe[idx] and macd_up_cross[idx]:
+        # CALL SCORE (Strict V4.2 Sniper Logic)
+        if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx]:
             # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope > 0) and
@@ -448,20 +448,20 @@ def check_signals(df, pair=None):
             )
             
             if v4_filters_ok:
-                c_score += 2  # Has trigger and passes V4 filters
-                if bb_call_trigger[idx]:
-                    c_score += 1
+                confirmations = 2  # MACD and Bollinger Band touches are both true
                 if ema_trend_call[idx]:
-                    c_score += 1
+                    confirmations += 1
                 if vol_increasing[idx]:
-                    c_score += 1
+                    confirmations += 1
                 if rsi_room_call[idx]:
-                    c_score += 1
-                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] > df.loc[idx, 'Open']:
-                    c_score += 1
+                    confirmations += 1
                 
-        # PUT SCORE
-        if put_safe[idx] and macd_down_cross[idx]:
+                # Must meet all confirmations to reach exactly Score 5
+                if confirmations >= 5:
+                    c_score = 5
+                
+        # PUT SCORE (Strict V4.2 Sniper Logic)
+        if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx]:
             # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope < 0) and
@@ -471,17 +471,17 @@ def check_signals(df, pair=None):
             )
             
             if v4_filters_ok:
-                p_score += 2  # Has trigger and passes V4 filters
-                if bb_put_trigger[idx]:
-                    p_score += 1
+                confirmations = 2  # MACD and Bollinger Band touches are both true
                 if ema_trend_put[idx]:
-                    p_score += 1
+                    confirmations += 1
                 if vol_increasing[idx]:
-                    p_score += 1
+                    confirmations += 1
                 if rsi_room_put[idx]:
-                    p_score += 1
-                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] < df.loc[idx, 'Open']:
-                    p_score += 1
+                    confirmations += 1
+                
+                # Must meet all confirmations to reach exactly Score 5
+                if confirmations >= 5:
+                    p_score = 5
                     
         call_scores.append(c_score)
         put_scores.append(p_score)
@@ -733,6 +733,11 @@ def get_scan_rejection_reason(closed_candle, pair, timeframe):
     """
     Evaluates closed_candle step-by-step to identify the exact technical reason why a potential trade was rejected.
     """
+    # Check session constraints first
+    time_val = closed_candle.name
+    if get_session_type(time_val) != "IN-SESSION":
+        return "OFF_SESSION"
+
     call_score = int(closed_candle.get('Call_Score', 0))
     put_score = int(closed_candle.get('Put_Score', 0))
     
@@ -807,9 +812,9 @@ def get_scan_rejection_reason(closed_candle, pair, timeframe):
     if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
         return f"PATTERN_REVERSED_({pattern})"
         
-    # If it passed all filters but score is < 4
+    # If it passed all filters but score is < 5
     score = call_score if sig_type == "CALL" else put_score
-    if score < 4:
+    if score < 5:
         return "SCORE_LOW"
         
     return "NONE"
@@ -890,8 +895,8 @@ def process_market_signals(pair, timeframe):
         sig_type = None
         confirmations = 0
         
-        # Determine score threshold based on pair Tier
-        min_score = 4 if pair in TIER_1_PAIRS else 5
+        # Determine score threshold (V4.2 Sniper: Strictly 5/5 confirmations)
+        min_score = 5
         
         if closed_candle['Call_Score'] >= min_score:
             sig_type = "CALL"
@@ -901,7 +906,7 @@ def process_market_signals(pair, timeframe):
             confirmations = closed_candle['Put_Score']
             
         if sig_type:
-            # Enforce MTF Hard Rule for 5m signals
+            # Enforce MTF Hard Rule for 5m signals (redundant for 15m, but kept for logic safety)
             if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
                 return
                 
@@ -909,23 +914,9 @@ def process_market_signals(pair, timeframe):
             if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
                 return
                 
-            # Expiry selection logic (V4 Sniper Update)
-            is_marubozu = (
-                'Pattern_Marubozu' in closed_candle and 
-                closed_candle['Pattern_Marubozu'] and 
-                (
-                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
-                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
-                )
-            )
-            
-            if is_marubozu:
-                expiry_str = "15 Minutes - STRONG++"
-                expiry_delta = 3 * delta_t
-            else:
-                expiry_str = "5 Minutes"
-                expiry_delta = delta_t
-                
+            # Expiry selection logic (V4.2 Sniper Update: Strictly 15 Minutes)
+            expiry_str = "15 Minutes"
+            expiry_delta = delta_t
             exit_time = closed_candle_time + expiry_delta
             
             pattern = closed_candle['Pattern_Label']
@@ -938,13 +929,24 @@ def process_market_signals(pair, timeframe):
                 strength = "STRONG"
                 
             session_type = get_session_type(closed_candle_time)
-            session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+            # Strict Session Block (V4.2 Sniper)
+            if session_type != "IN-SESSION":
+                return False
+                
+            is_marubozu = (
+                'Pattern_Marubozu' in closed_candle and 
+                closed_candle['Pattern_Marubozu'] and 
+                (
+                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
+                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
+                )
+            )
 
             new_sig = {
                 "id": str(int(time.time())) + f"-{pair}-{timeframe}",
                 "time": closed_candle_time,
                 "pair": pair,
-                "timeframe": timeframe,
+                "timeframe": timeframe.upper(), # Save uppercase "15M" to database
                 "type": sig_type,
                 "entry_price": float(closed_candle['Close']),
                 "exit_time": exit_time,
@@ -1041,8 +1043,8 @@ def process_market_signals_prefetched(pair, timeframe, df):
         sig_type = None
         confirmations = 0
         
-        # Determine score threshold based on pair Tier
-        min_score = 4 if pair in TIER_1_PAIRS else 5
+        # Determine score threshold (V4.2 Sniper: Strictly 5/5 confirmations)
+        min_score = 5
         
         if closed_candle['Call_Score'] >= min_score:
             sig_type = "CALL"
@@ -1052,7 +1054,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
             confirmations = closed_candle['Put_Score']
             
         if sig_type:
-            # Enforce MTF Hard Rule for 5m signals
+            # Enforce MTF Hard Rule for 5m signals (redundant for 15m, but kept for logic safety)
             if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
                 return
                 
@@ -1060,23 +1062,9 @@ def process_market_signals_prefetched(pair, timeframe, df):
             if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
                 return
                 
-            # Expiry selection logic (V4 Sniper Update)
-            is_marubozu = (
-                'Pattern_Marubozu' in closed_candle and 
-                closed_candle['Pattern_Marubozu'] and 
-                (
-                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
-                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
-                )
-            )
-            
-            if is_marubozu:
-                expiry_str = "15 Minutes - STRONG++"
-                expiry_delta = 3 * delta_t
-            else:
-                expiry_str = "5 Minutes"
-                expiry_delta = delta_t
-                
+            # Expiry selection logic (V4.2 Sniper Update: Strictly 15 Minutes)
+            expiry_str = "15 Minutes"
+            expiry_delta = delta_t
             exit_time = closed_candle_time + expiry_delta
             
             pattern = closed_candle['Pattern_Label']
@@ -1089,13 +1077,26 @@ def process_market_signals_prefetched(pair, timeframe, df):
                 strength = "STRONG"
                 
             session_type = get_session_type(closed_candle_time)
+            # Strict Session Block (V4.2 Sniper)
+            if session_type != "IN-SESSION":
+                return False
+                
             session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+            
+            is_marubozu = (
+                'Pattern_Marubozu' in closed_candle and 
+                closed_candle['Pattern_Marubozu'] and 
+                (
+                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
+                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
+                )
+            )
 
             new_sig = {
                 "id": str(int(time.time())) + f"-{pair}-{timeframe}",
                 "time": closed_candle_time,
                 "pair": pair,
-                "timeframe": timeframe,
+                "timeframe": timeframe.upper(), # Save uppercase "15M" to database
                 "type": sig_type,
                 "entry_price": float(closed_candle['Close']),
                 "exit_time": exit_time,
@@ -1169,7 +1170,7 @@ def send_hourly_summary():
         
         for tf in ["1m", "5m", "15m"]:
             tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
-            tf_sigs = [s for s in signals if s["timeframe"] == tf]
+            tf_sigs = [s for s in signals if s["timeframe"].upper() == tf.upper()]
             
             wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
             losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
@@ -1246,8 +1247,9 @@ def resolve_pending_signals():
     for (pair, timeframe), sigs in grouped.items():
         try:
             # Download latest data to verify exit candle prices
-            lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
-            df = yf.download(pair, period=lookback, interval=timeframe, progress=False, threads=False)
+            tf_lower = timeframe.lower()
+            lookback = "2d" if tf_lower == "5m" else ("5d" if tf_lower == "15m" else "1d")
+            df = yf.download(pair, period=lookback, interval=tf_lower, progress=False, threads=False)
             if df.empty:
                 continue
             if isinstance(df.columns, pd.MultiIndex):
@@ -1261,7 +1263,7 @@ def resolve_pending_signals():
                 exit_time_utc = exit_time_raw.tz_convert(pytz.utc) if exit_time_raw.tzinfo else pytz.utc.localize(exit_time_raw)
                 
                 # Calculate when the exit candle has actually closed
-                delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
+                delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else (datetime.timedelta(minutes=5) if tf_lower == "5m" else datetime.timedelta(minutes=15)))
                 actual_close_time_utc = exit_time_utc + delta_t
                 
                 if now_utc > actual_close_time_utc:

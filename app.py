@@ -228,9 +228,9 @@ def start_background_scanner():
                 # Print live heartbeat log to console
                 print(f"[HEARTBEAT] Cloud Background Scanner active and scanning 8 pairs - {datetime.datetime.now().strftime('%H:%M:%S')}")
                 
-                # Run the scanning process using high-speed parallel batch downloading
-                for timeframe in ["5m"]:
-                    lookback = "2d" if timeframe == "5m" else "5d"
+                # Run the scanning process using high-speed parallel batch downloading (Strict V4.2 15m)
+                for timeframe in ["15m"]:
+                    lookback = "5d"
                     try:
                         # Fetch all tickers in parallel in a single HTTP request (extremely fast)
                         df_batch = yf.download(worker.RADAR_PAIRS, period=lookback, interval=timeframe, group_by="ticker", progress=False, threads=True)
@@ -243,11 +243,7 @@ def start_background_scanner():
                                     
                                 # Check if we are in the Pre-Alert window (20 seconds before the candle closes)
                                 now_utc = datetime.datetime.now(pytz.utc)
-                                is_pre_alert_window = False
-                                if timeframe == "5m":
-                                    is_pre_alert_window = (now_utc.minute % 5 == 4) and (40 <= now_utc.second <= 59)
-                                elif timeframe == "15m":
-                                    is_pre_alert_window = (now_utc.minute % 15 == 14) and (40 <= now_utc.second <= 59)
+                                is_pre_alert_window = (now_utc.minute % 15 == 14) and (40 <= now_utc.second <= 59)
                                     
                                 if is_pre_alert_window:
                                     try:
@@ -258,40 +254,39 @@ def start_background_scanner():
                                             live_row = df_pre.iloc[-1]
                                             live_time = df_pre.index[-1]
                                             
-                                            # Determine pre-alert score threshold based on pair Tier
-                                            min_pre_score = 3 if pair in TIER_1_PAIRS else 4
+                                            # Determine pre-alert score threshold (V4.2 pre-alert is 4/5)
+                                            min_pre_score = 4
                                             
                                             pre_sig_type = None
                                             if live_row['Call_Score'] >= min_pre_score:
                                                 pre_sig_type = "CALL"
                                             elif live_row['Put_Score'] >= min_pre_score:
                                                 pre_sig_type = "PUT"
-                                                
+                                            
                                             if pre_sig_type:
                                                 pre_session_type = worker.get_session_type(live_time)
-                                                pre_session_label = "🟢 IN-SESSION" if pre_session_type == "IN-SESSION" else "🟡 OFF-SESSION"
-                                                
-                                                pre_key = (pair, timeframe, live_time)
-                                                if pre_key not in sent_pre_alerts:
-                                                    sent_pre_alerts[pre_key] = (pre_sig_type, pre_session_label)
-                                                    # Limit size of tracking dictionary
-                                                    if len(sent_pre_alerts) > 100:
-                                                        sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
-                                                    
-                                                    # Format and send Pre-Alert to Telegram
-                                                    now_pkt = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
-                                                    now_utc = now_pkt.astimezone(pytz.utc)
-                                                    pre_time_str = f"{now_pkt.strftime('%I:%M:%S %p PKT')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
-                                                    pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
-                                                    pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
-                                                              f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
-                                                              f"<b>Direction:</b> {pre_dir}\n" \
-                                                              f"<b>Session:</b> {pre_session_label}\n" \
-                                                              f"<b>Time:</b> {pre_time_str}\n" \
-                                                              f"<b>Status:</b> Waiting for final 20s confirmation...\n" \
-                                                              f"<b>Note:</b> Ye Final Signal nahi hai. Sirf Alert hai."
-                                                    worker.send_telegram_alert(pre_msg)
-                                                    print(f"[PRE-ALERT] Sent pre-alert for {pair} {timeframe} {pre_sig_type}")
+                                                if pre_session_type == "IN-SESSION":
+                                                    pre_session_label = "🟢 IN-SESSION"
+                                                    pre_key = (pair, timeframe, live_time)
+                                                    if pre_key not in sent_pre_alerts:
+                                                        sent_pre_alerts[pre_key] = (pre_sig_type, pre_session_label)
+                                                        if len(sent_pre_alerts) > 100:
+                                                            sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
+                                                        
+                                                        # Format and send Pre-Alert to Telegram
+                                                        now_pkt = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
+                                                        now_utc = now_pkt.astimezone(pytz.utc)
+                                                        pre_time_str = f"{now_pkt.strftime('%I:%M:%S %p PKT')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
+                                                        pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
+                                                        pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
+                                                                  f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                                                                  f"<b>Direction:</b> {pre_dir}\n" \
+                                                                  f"<b>Session:</b> {pre_session_label}\n" \
+                                                                  f"<b>Time:</b> {pre_time_str}\n" \
+                                                                  f"<b>Status:</b> Waiting for final 20s confirmation...\n" \
+                                                                  f"<b>Note:</b> Ye Final Signal nahi hai. Sirf Alert hai."
+                                                        worker.send_telegram_alert(pre_msg)
+                                                        print(f"[PRE-ALERT] Sent pre-alert for {pair} {timeframe} {pre_sig_type}")
                                     except Exception as pre_e:
                                         print(f"Pre-alert calculation error: {pre_e}")
                                         
@@ -333,7 +328,13 @@ def start_background_scanner():
                         print(f"Batch download error for {timeframe}: {e}")
                     time.sleep(1.0)
                 
-                worker.resolve_pending_signals()
+                try:
+                    worker.resolve_pending_signals()
+                except Exception as res_e:
+                    print(f"Error resolving pending signals: {res_e}")
+                
+                # Update last scan time in worker (Jeddah Time AST)
+                worker.LAST_SCAN_TIME = datetime.datetime.now(pytz.timezone("Asia/Riyadh")).strftime('%I:%M:%S %p AST')
                 
                 # Check current time in Saudi Arabia (Jeddah/Riyadh)
                 tz_ry = pytz.timezone("Asia/Riyadh")
@@ -374,12 +375,63 @@ def start_background_scanner():
                         worker.send_telegram_alert(session_msg)
                     last_session_alert_hour = hour_key
                 
+                # 4. Auto Self-Test Every 6 Hours (V4.2 Diagnostics check)
+                now_utc = datetime.datetime.now(pytz.utc)
+                if not hasattr(worker, "LAST_SELF_TEST_TIME") or worker.LAST_SELF_TEST_TIME is None:
+                    # Run immediately on first thread loop to verify setup
+                    worker.LAST_SELF_TEST_TIME = now_utc - datetime.timedelta(hours=6)
+                    
+                if (now_utc - worker.LAST_SELF_TEST_TIME).total_seconds() >= 21600:
+                    import requests
+                    db_ok = False
+                    try:
+                        supabase_client.table("signals").select("*").limit(1).execute()
+                        db_ok = True
+                    except Exception:
+                        pass
+                        
+                    tg_ok = False
+                    try:
+                        url_tg = f"https://api.telegram.org/bot{worker.TELEGRAM_BOT_TOKEN}/getMe"
+                        res_tg = requests.get(url_tg, timeout=5)
+                        if res_tg.status_code == 200:
+                            tg_ok = True
+                    except Exception:
+                        pass
+                        
+                    yf_ok = False
+                    try:
+                        df_test = yf.download("EURUSD=X", period="1d", interval="15m", progress=False)
+                        if not df_test.empty:
+                            yf_ok = True
+                    except Exception:
+                        pass
+                        
+                    thread_alive = any(t.name == "scanner_thread_func" for t in threading.enumerate())
+                    
+                    if db_ok and tg_ok and yf_ok and thread_alive:
+                        status_msg = "🟢 <b>SYSTEM OK: V4.2 Scanner Thread Active</b>\n\n" \
+                                     "• Supabase: Connected\n" \
+                                     "• yfinance: Online\n" \
+                                     "• Telegram: Valid\n" \
+                                     "• Scanner Thread: Alive"
+                        worker.send_telegram_alert(status_msg)
+                    else:
+                        alert_msg = "🚨 <b>SYSTEM ALERT: Diagnostics Failure!</b>\n\n" \
+                                    f"• Scanner Thread: {'🟢 Alive' if thread_alive else '🔴 DEAD'}\n" \
+                                    f"• Supabase DB: {'🟢 Connected' if db_ok else '🔴 FAILED'}\n" \
+                                    f"• yfinance API: {'🟢 Online' if yf_ok else '🔴 OFFLINE'}\n" \
+                                    f"• Telegram Bot: {'🟢 Valid' if tg_ok else '🔴 INVALID'}"
+                        worker.send_telegram_alert(alert_msg)
+                        
+                    worker.LAST_SELF_TEST_TIME = now_utc
+                
                 time.sleep(10)
             except Exception as e:
                 print(f"Background scanner loop error: {e}")
                 time.sleep(15)
                 
-    thread = threading.Thread(target=scanner_thread_func, daemon=True)
+    thread = threading.Thread(target=scanner_thread_func, name="scanner_thread_func", daemon=True)
     thread.start()
     return thread
 
@@ -390,7 +442,7 @@ def fetch_signals_from_db(pair, timeframe):
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("*").eq("pair", pair).eq("timeframe", timeframe).order("time", desc=True).limit(50).execute()
+        res = supabase_client.table("signals").select("*").eq("pair", pair).eq("timeframe", timeframe.upper()).order("time", desc=True).limit(50).execute()
         signals = []
         for r in (res.data if res.data else []):
             try:
@@ -1099,8 +1151,8 @@ def check_signals(df, pair=None):
         bb_lower = df.loc[idx, 'BB_Lower']
         bb_upper = df.loc[idx, 'BB_Upper']
         
-        # CALL SCORE
-        if call_safe[idx] and macd_up_cross[idx]:
+        # CALL SCORE (Strict V4.2 Sniper Logic)
+        if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx]:
             # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope > 0) and
@@ -1110,20 +1162,20 @@ def check_signals(df, pair=None):
             )
             
             if v4_filters_ok:
-                c_score += 2  # Has trigger and passes V4 filters
-                if bb_call_trigger[idx]:
-                    c_score += 1
+                confirmations = 2  # MACD and Bollinger Band touches are both true
                 if ema_trend_call[idx]:
-                    c_score += 1
+                    confirmations += 1
                 if vol_increasing[idx]:
-                    c_score += 1
+                    confirmations += 1
                 if rsi_room_call[idx]:
-                    c_score += 1
-                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] > df.loc[idx, 'Open']:
-                    c_score += 1
+                    confirmations += 1
                 
-        # PUT SCORE
-        if put_safe[idx] and macd_down_cross[idx]:
+                # Must meet all confirmations to reach exactly Score 5
+                if confirmations >= 5:
+                    c_score = 5
+                
+        # PUT SCORE (Strict V4.2 Sniper Logic)
+        if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx]:
             # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope < 0) and
@@ -1133,17 +1185,17 @@ def check_signals(df, pair=None):
             )
             
             if v4_filters_ok:
-                p_score += 2  # Has trigger and passes V4 filters
-                if bb_put_trigger[idx]:
-                    p_score += 1
+                confirmations = 2  # MACD and Bollinger Band touches are both true
                 if ema_trend_put[idx]:
-                    p_score += 1
+                    confirmations += 1
                 if vol_increasing[idx]:
-                    p_score += 1
+                    confirmations += 1
                 if rsi_room_put[idx]:
-                    p_score += 1
-                if 'Pattern_Marubozu' in df.columns and df.loc[idx, 'Pattern_Marubozu'] and df.loc[idx, 'Close'] < df.loc[idx, 'Open']:
-                    p_score += 1
+                    confirmations += 1
+                
+                # Must meet all confirmations to reach exactly Score 5
+                if confirmations >= 5:
+                    p_score = 5
                     
         call_scores.append(c_score)
         put_scores.append(p_score)
@@ -1484,7 +1536,7 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"5 Minutes": "5m"}
+timeframe_map = {"15 Minutes": "15m"}
 timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=0)
 timeframe = timeframe_map[timeframe_sel]
 
@@ -1711,7 +1763,7 @@ if st.sidebar.button("🔍 Generate Summary", use_container_width=True):
                 total_wins = 0
                 total_losses = 0
                 for tf in ["1m", "5m", "15m"]:
-                    tf_sigs = [s for s in signals if s["timeframe"] == tf]
+                    tf_sigs = [s for s in signals if s["timeframe"].upper() == tf.upper()]
                     wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
                     losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
                     total_wl = wins + losses
@@ -1875,11 +1927,11 @@ with col_center:
                 st.markdown(f"- 🚩 **{event['title']}** ({event['country']}) at **{event['time']}**")
                 
     # Tab View for Live, TradingView and Backtest
-    tab_live, tab_tv, tab_backtest = st.tabs(["📈 STATION CHART (Indicators & Alerts)", "🖥️ TRADINGVIEW WIDGET", "🧪 SYSTEM BACKTEST"])
+    tab_live, tab_tv, tab_backtest, tab_diag = st.tabs(["📈 STATION CHART (Indicators & Alerts)", "🖥️ TRADINGVIEW WIDGET", "🧪 SYSTEM BACKTEST", "🩺 SYSTEM DIAGNOSTICS"])
     
     with tab_live:
         # Download Active Ticker Live Data
-        lookback = "5d" if timeframe == "5m" else "2d"
+        lookback = "5d" if timeframe.lower() in ["5m", "15m"] else "2d"
         try:
             # df_live has already been downloaded and processed at the top of the pipeline
             if not df_live.empty:
@@ -1941,7 +1993,7 @@ with col_center:
                 
                 # Historical arrows overlay
                 for sig in st.session_state.signal_history:
-                    if sig["pair"] == active_pair and sig["timeframe"] == timeframe:
+                    if sig["pair"] == active_pair and sig["timeframe"].upper() == timeframe.upper():
                         sig_time = sig["time"]
                         if sig_time in df_live.index:
                             price_pt = sig["entry_price"]
@@ -2067,6 +2119,295 @@ with col_center:
             
     with tab_backtest:
         run_backtest(active_pair, timeframe)
+
+    with tab_diag:
+        st.subheader("🩺 System Diagnostics Dashboard (V4.2 Sniper)")
+        
+        # Load env variables for connection tests
+        tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        tg_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+        
+        # 1. Connection Status Check
+        st.markdown("### 🔌 CONNECTION STATUS CHECK")
+        db_ok = False
+        db_msg = "Unknown Error"
+        last_sig = None
+        if supabase_client is not None:
+            try:
+                res_db = supabase_client.table("signals").select("*").limit(1).execute()
+                db_ok = True
+                db_msg = "Connected"
+                if res_db.data:
+                    last_sig = res_db.data[0]
+            except Exception as dbe:
+                db_msg = str(dbe)
+                
+        tg_ok = False
+        bot_name = "N/A"
+        tg_msg = "Unknown Error"
+        if tg_token and tg_chat_id:
+            try:
+                url_tg = f"https://api.telegram.org/bot{tg_token}/getMe"
+                res_tg = requests.get(url_tg, timeout=5)
+                if res_tg.status_code == 200:
+                    tg_ok = True
+                    bot_name = res_tg.json().get("result", {}).get("first_name", "Unknown")
+                    tg_msg = "Valid"
+                else:
+                    tg_msg = f"HTTP Error {res_tg.status_code}: {res_tg.text}"
+            except Exception as tge:
+                tg_msg = str(tge)
+                
+        yf_ok = False
+        yf_msg = "Unknown Error"
+        try:
+            df_yf = yf.download("EURUSD=X", period="1d", interval="15m", progress=False)
+            if not df_yf.empty:
+                yf_ok = True
+                yf_msg = f"Online (Last Close: {float(df_yf['Close'].iloc[-1]):.5f})"
+            else:
+                yf_msg = "Empty DataFrame"
+        except Exception as yfe:
+            yf_msg = str(yfe)
+            
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Supabase Database", "🟢 Connected" if db_ok else "🔴 Failed", help=db_msg)
+            if last_sig:
+                st.caption(f"Last Signal: {last_sig['pair']} [{last_sig['timeframe']}] at {last_sig['time'][:16]}")
+        with c2:
+            st.metric("Telegram Connection", "🟢 Valid" if tg_ok else "🔴 Invalid", f"Bot: {bot_name}", help=tg_msg)
+        with c3:
+            st.metric("yfinance API Connection", "🟢 Online" if yf_ok else "🔴 Offline", help=yf_msg)
+            
+        # 2. Scanner Thread Status
+        st.markdown("### ⚙️ SCANNER THREAD STATUS")
+        import threading
+        thread_alive = any(t.name == "scanner_thread_func" for t in threading.enumerate())
+        
+        last_scan_time = getattr(worker, "LAST_SCAN_TIME", "N/A")
+        now_ast = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
+        session_type = worker.get_session_type(now_ast)
+        session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+        
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            st.metric("Scanner Thread State", "🟢 Running (Alive)" if thread_alive else "🔴 Stopped (Dead)")
+        with s2:
+            st.metric("Last Scan Event", last_scan_time)
+        with s3:
+            st.metric("Current Market Session", session_label, help="London + New York overlap: 10AM-10PM AST")
+            
+        # 3. V4.2 Logic Verifier
+        st.markdown("### 🧪 V4.2 STRATEGY LOGIC VERIFIER")
+        if st.button("Run Test Signal Logic", use_container_width=True):
+            try:
+                # Create a mock dataframe
+                dates = pd.date_range(start='2026-07-30T10:00:00', periods=60, freq='15min')
+                df_test = pd.DataFrame({
+                    'Open': [1.08500] * 60,
+                    'High': [1.08600] * 60,
+                    'Low': [1.08400] * 60,
+                    'Close': [1.08520] * 60,
+                    'Volume': [1000] * 60,
+                }, index=dates)
+                
+                # Calculate indicators
+                df_test = calculate_indicators(df_test)
+                
+                # Force the last row to pass all filters:
+                # MACD Crossover:
+                df_test.loc[df_test.index[-2], 'MACD'] = 0.00010
+                df_test.loc[df_test.index[-2], 'MACD_Signal'] = 0.00015
+                df_test.loc[df_test.index[-1], 'MACD'] = 0.00020
+                df_test.loc[df_test.index[-1], 'MACD_Signal'] = 0.00018
+                
+                # Bollinger Band touch:
+                df_test.loc[df_test.index[-1], 'BB_Lower'] = 1.08450
+                df_test.loc[df_test.index[-1], 'Low'] = 1.08400  # Low <= BB_Lower (Touch!)
+                
+                # Volume Spike:
+                df_test.loc[df_test.index[-2], 'Volume'] = 1000
+                df_test.loc[df_test.index[-1], 'Volume'] = 1500  # Spike!
+                
+                # EMA trend:
+                df_test.loc[df_test.index[-1], 'EMA_50'] = 1.08300
+                df_test.loc[df_test.index[-1], 'EMA_200'] = 1.08200
+                df_test.loc[df_test.index[-1], 'Close'] = 1.08500  # Close > EMA_50 > EMA_200 (True!)
+                df_test.loc[df_test.index[-1], 'EMA_200_Slope'] = 0.00001  # Positive slope
+                
+                # RSI Room to grow & Range:
+                df_test.loc[df_test.index[-1], 'RSI_14'] = 43.0  # Between 40 and 55, and < 45 (True!)
+                
+                # ATR Spike filter:
+                df_test.loc[df_test.index[-1], 'ATR_Spike'] = False
+                
+                # Swing Low Proximity:
+                df_test.loc[df_test.index[-1], 'Swing_Low_20'] = 1.08410
+                
+                # Run check_signals
+                df_res = check_signals(df_test, "EURUSD=X")
+                
+                last_row = df_res.iloc[-1]
+                score = last_row['Call_Score']
+                
+                # Inspect conditions to display in UI
+                macd_ok = (df_res['MACD'].iloc[-2] <= df_res['MACD_Signal'].iloc[-2]) and (df_res['MACD'].iloc[-1] > df_res['MACD_Signal'].iloc[-1])
+                bb_ok = (df_res['Low'].iloc[-1] <= df_res['BB_Lower'].iloc[-1])
+                vol_ok = (df_res['Volume'].iloc[-1] > df_res['Volume'].iloc[-2])
+                
+                st.markdown(f"**Mock State Verification:** MACD_Cross={macd_ok}, BB_Touch={bb_ok}, Volume_Spike={vol_ok}, Score={score}/5")
+                if score == 5:
+                    st.success("🟢 **MACD: True, BB: True, Volume: True, Score: 5 -> RESULT: SIGNAL WOULD FIRE**")
+                else:
+                    st.error(f"🔴 **RESULT: SIGNAL BLOCKED (Score was {score}/5)**")
+            except Exception as ex:
+                st.error(f"Error during self-test: {ex}")
+                
+        # 4. Alert Test Buttons
+        st.markdown("### 🔔 ALERT TEST BUTTONS")
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            if st.button("Send Test Pre-Alert", use_container_width=True):
+                pre_msg = f"🚨 <b>PRE-ALERT LOADING... (TEST)</b>\n\n" \
+                          f"<b>Pair:</b> EURUSD\n" \
+                          f"<b>Direction:</b> 🟢 CALL\n" \
+                          f"<b>Session:</b> 🟢 IN-SESSION\n" \
+                          f"<b>Time:</b> {datetime.datetime.now(pytz.timezone('Asia/Riyadh')).strftime('%I:%M:%S %p AST')}\n" \
+                          f"<b>Status:</b> Waiting for final 20s confirmation...\n" \
+                          f"<b>Note:</b> Diagnostics connection check."
+                worker.send_telegram_alert(pre_msg)
+                st.success("Pre-Alert sent!")
+        with a2:
+            if st.button("Send Test Final Signal", use_container_width=True):
+                sig_msg = f"✅ <b>FINAL SIGNAL (TEST)</b>\n\n" \
+                          f"<b>Pair:</b> EURUSD\n" \
+                          f"<b>Direction:</b> 🟢 CALL\n" \
+                          f"<b>Session:</b> 🟢 IN-SESSION\n" \
+                          f"<b>Entry Time:</b> {datetime.datetime.now(pytz.timezone('Asia/Riyadh')).strftime('%I:%M %p AST')}\n" \
+                          f"<b>Expiry:</b> 15 Minutes\n" \
+                          f"<b>Reason:</b> All 5 Confirmations + V4.2 Filters Passed\n" \
+                          f"<b>Risk:</b> Low"
+                worker.send_telegram_alert(sig_msg)
+                st.success("Final Signal sent!")
+        with a3:
+            if st.button("Send Test Hourly Report", use_container_width=True):
+                worker.send_hourly_summary()
+                st.success("Hourly Report sent!")
+                
+        # 5. Dashboard Health (DB Count & Last 5 Signals Table)
+        st.markdown("### 📋 TODAY'S SIGNALS & HEALTH")
+        today_sigs_count = 0
+        last_5_sigs = []
+        
+        # Calculate today Riyadh AST start time
+        tz_ry = pytz.timezone("Asia/Riyadh")
+        now_ry = datetime.datetime.now(tz_ry)
+        start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
+        start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
+        
+        if supabase_client is not None:
+            try:
+                # Query signals from today (Jeddah Time)
+                res_all = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).order("time", desc=True).execute()
+                all_today_sigs = res_all.data if res_all.data else []
+                # Filter strictly 15M
+                today_sigs_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "15M")
+                
+                # Fetch last 5 signals regardless of date
+                res_5 = supabase_client.table("signals").select("*").order("time", desc=True).limit(5).execute()
+                last_5_sigs = res_5.data if res_5.data else []
+            except Exception as health_e:
+                st.error(f"Error fetching health stats: {health_e}")
+                
+        st.metric("15M Signals Today", today_sigs_count)
+        
+        st.markdown("**Last 5 Signals Table**")
+        if last_5_sigs:
+            rows_list = []
+            for s in last_5_sigs:
+                sig_time_utc = pd.to_datetime(s["time"])
+                sig_time_ry = sig_time_utc.astimezone(pytz.timezone("Asia/Riyadh"))
+                time_str = sig_time_ry.strftime("%I:%M %p")
+                
+                # Determine reason based on score
+                confirmations = s.get("confirmations", "0/5")
+                if "5/5" in confirmations or s.get("status") == "WIN":
+                    reason = f"Fired because: MACD_Cross=True, BB_{'Lower' if s['type']=='CALL' else 'Upper'}=True, Volume_Spike=True, Score=5"
+                else:
+                    diagnostics_raw = s.get("diagnostics", "")
+                    reason = diagnostics_raw if diagnostics_raw else "Score or filters failed."
+                    
+                rows_list.append({
+                    "Time (AST)": time_str,
+                    "Pair": s["pair"].replace("=X", ""),
+                    "Direction": s["type"],
+                    "Score": confirmations,
+                    "Result": s["status"],
+                    "Reason": reason
+                })
+            st.table(pd.DataFrame(rows_list))
+        else:
+            st.info("No signals found in database history.")
+            
+        # 6. Signal Post-Mortem Table
+        st.markdown("### 🔍 SIGNAL POST-MORTEM ANALYZER")
+        postmortem_list = []
+        if supabase_client is not None:
+            try:
+                # Fetch resolved signals
+                res_all_resolved = supabase_client.table("signals").select("*").order("time", desc=True).limit(20).execute()
+                resolved_sigs = res_all_resolved.data if res_all_resolved.data else []
+                for s in resolved_sigs:
+                    status = s["status"]
+                    if status == "PENDING":
+                        continue
+                    entry = float(s["entry_price"])
+                    exit_p = float(s["exit_price"]) if s.get("exit_price") is not None else None
+                    pair_name = s["pair"].replace("=X", "")
+                    sig_type = s["type"]
+                    
+                    label = "TP" if status == "WIN" else ("SL" if status == "LOSS" else "TIE")
+                    
+                    if status == "WIN":
+                        if sig_type == "CALL":
+                            reason = f"Succeeded: Exit price {exit_p:.5f} was higher than Entry price {entry:.5f}."
+                        else:
+                            reason = f"Succeeded: Exit price {exit_p:.5f} was lower than Entry price {entry:.5f}."
+                    elif status == "LOSS":
+                        if sig_type == "CALL":
+                            if exit_p is not None:
+                                reason = f"Failed: Price did not hold. Reversed to exit price {exit_p:.5f} (lower than Entry {entry:.5f})."
+                            else:
+                                reason = "Failed: Exit price unavailable."
+                        else:
+                            if exit_p is not None:
+                                reason = f"Failed: Price did not hold. Reversed to exit price {exit_p:.5f} (higher than Entry {entry:.5f})."
+                            else:
+                                reason = "Failed: Exit price unavailable."
+                    else:
+                        reason = f"TIE: Exit price {exit_p:.5f} equal to Entry price {entry:.5f}."
+                        
+                    sig_time_utc = pd.to_datetime(s["time"])
+                    sig_time_ry = sig_time_utc.astimezone(pytz.timezone("Asia/Riyadh"))
+                    time_str = sig_time_ry.strftime("%Y-%m-%d %I:%M %p")
+                    
+                    postmortem_list.append({
+                        "Time (AST)": time_str,
+                        "Pair": pair_name,
+                        "Direction": sig_type,
+                        "Entry": entry,
+                        "Exit": exit_p if exit_p is not None else "N/A",
+                        "Result": label,
+                        "Details": reason
+                    })
+            except Exception as pm_e:
+                st.error(f"Error loading post-mortem: {pm_e}")
+                
+        if postmortem_list:
+            st.table(pd.DataFrame(postmortem_list))
+        else:
+            st.info("No resolved signals in database to analyze.")
 
 # RIGHT COLUMN - LIVE COMPACT SIGNAL LOGS & METRICS
 with col_right:
