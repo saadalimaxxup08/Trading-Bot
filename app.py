@@ -19,6 +19,22 @@ load_dotenv(dotenv_path=env_path)
 
 from supabase import create_client, Client, ClientOptions
 
+def trigger_confetti():
+    import streamlit.components.v1 as components
+    components.html("""
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script>
+        setTimeout(function() {
+            confetti({
+                particleCount: 180,
+                spread: 100,
+                origin: { y: 0.6 },
+                colors: ['#ffd700', '#00ff88', '#ffffff']
+            });
+        }, 100);
+    </script>
+    """, height=0)
+
 # Setup page config for a premium wide layout
 st.set_page_config(
     page_title="Binary Pro Scanner V4 - Sniper Edition",
@@ -32,121 +48,270 @@ GLOBAL_SETTINGS = {
     "session_filter_enabled": True
 }
 
-# Custom premium dark styling
+# Custom premium dark styling (VIP Trading Dashboard)
 st.markdown("""
 <style>
-    /* Main Layout Styling */
+    /* Premium Glassmorphism Theme */
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap');
+    
     .stApp {
-        background-color: #0b0e14;
-        color: #e0e6ed;
+        background: linear-gradient(135deg, #050510 0%, #0a0a20 50%, #15102a 100%) !important;
+        font-family: 'Outfit', sans-serif !important;
+        color: #e2e8f0 !important;
     }
-    .stButton>button {
-        background-color: #1e88e5;
-        color: white;
-        border-radius: 6px;
-        border: none;
-        padding: 10px 24px;
-        font-weight: 600;
-        transition: all 0.3s ease;
+    
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
     }
-    .stButton>button:hover {
-        background-color: #1565c0;
-        transform: translateY(-2px);
+    ::-webkit-scrollbar-track {
+        background: rgba(10, 10, 30, 0.5);
     }
-    /* Metric Cards Styling */
-    .metric-card {
-        background: rgba(30, 41, 59, 0.5);
+    ::-webkit-scrollbar-thumb {
+        background: rgba(255, 215, 0, 0.3);
+        border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 215, 0, 0.6);
+    }
+
+    /* Glassmorphic Card Container */
+    .vip-card {
+        background: rgba(20, 20, 45, 0.45) !important;
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 215, 0, 0.15) !important;
+        border-radius: 16px !important;
+        padding: 20px !important;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
+        margin-bottom: 20px !important;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+    }
+    .vip-card:hover {
+        border-color: rgba(255, 215, 0, 0.4) !important;
+        box-shadow: 0 12px 40px 0 rgba(255, 215, 0, 0.1) !important;
+        transform: translateY(-2px) !important;
+    }
+
+    /* KPI Grid */
+    .kpi-container {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 25px;
+    }
+    .kpi-card {
+        flex: 1;
+        background: linear-gradient(135deg, rgba(26, 26, 58, 0.6) 0%, rgba(15, 15, 35, 0.6) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.05);
         border-radius: 12px;
-        padding: 15px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 20px;
         text-align: center;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+        position: relative;
+        overflow: hidden;
         backdrop-filter: blur(10px);
     }
-    .metric-title {
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(255,215,0,0.05) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .kpi-title {
         font-size: 0.85rem;
         color: #94a3b8;
-        margin-bottom: 5px;
-        font-weight: 500;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .metric-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #ffffff;
-    }
-    /* HTML Table badges */
-    .badge {
-        padding: 4px 10px;
-        border-radius: 4px;
+        letter-spacing: 0.1em;
+        margin-bottom: 8px;
         font-weight: 600;
+    }
+    .kpi-value {
+        font-size: 2.2rem;
+        font-weight: 800;
+        background: linear-gradient(90deg, #ffffff 0%, #fef08a 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .kpi-accent-gold {
+        border: 1px solid rgba(255, 215, 0, 0.3) !important;
+        box-shadow: 0 0 15px rgba(255, 215, 0, 0.05);
+    }
+    .kpi-accent-green {
+        border: 1px solid rgba(0, 255, 136, 0.3) !important;
+        box-shadow: 0 0 15px rgba(0, 255, 136, 0.05);
+    }
+
+    /* Stylish Buttons */
+    .stButton>button {
+        background: linear-gradient(90deg, #ffd700 0%, #b8860b 100%) !important;
+        color: #050510 !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 12px 28px !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        letter-spacing: 0.05em !important;
+        text-transform: uppercase !important;
+        box-shadow: 0 4px 15px rgba(255, 215, 0, 0.2) !important;
+        transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px) scale(1.02) !important;
+        box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4) !important;
+    }
+    .stButton>button:active {
+        transform: translateY(1px) !important;
+    }
+
+    /* Badges */
+    .vip-badge {
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-weight: 700;
         font-size: 0.75rem;
         text-transform: uppercase;
-        display: inline-block;
-        text-align: center;
+        letter-spacing: 0.05em;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }
-    .badge-win {
-        background-color: #1b5e20;
-        color: #a5d6a7;
-        border: 1px solid #2e7d32;
+    .vip-badge-win {
+        background: rgba(0, 255, 136, 0.12) !important;
+        color: #00ff88 !important;
+        border-color: rgba(0, 255, 136, 0.3) !important;
     }
-    .badge-loss {
-        background-color: #b71c1c;
-        color: #ef9a9a;
-        border: 1px solid #c62828;
+    .vip-badge-loss {
+        background: rgba(255, 7, 58, 0.12) !important;
+        color: #ff073a !important;
+        border-color: rgba(255, 7, 58, 0.3) !important;
     }
-    .badge-pending {
-        background-color: #e65100;
-        color: #ffe0b2;
-        border: 1px solid #f57c00;
+    .vip-badge-pending {
+        background: rgba(255, 215, 0, 0.1) !important;
+        color: #ffd700 !important;
+        border-color: rgba(255, 215, 0, 0.3) !important;
     }
-    .badge-tie {
-        background-color: #37474f;
-        color: #cfd8dc;
-        border: 1px solid #455a64;
+    
+    /* Header Session Glow */
+    .glow-green {
+        box-shadow: 0 0 12px #00ff88;
+        animation: pulse-glow 2s infinite alternate;
     }
-    .badge-call {
-        background-color: #1b5e20;
-        color: #ffffff;
-        font-weight: bold;
+    .glow-gold {
+        box-shadow: 0 0 12px #ffd700;
+        animation: pulse-glow-gold 2s infinite alternate;
     }
-    .badge-put {
-        background-color: #b71c1c;
-        color: #ffffff;
-        font-weight: bold;
+    
+    @keyframes pulse-glow {
+        0% { box-shadow: 0 0 4px rgba(0, 255, 136, 0.4); }
+        100% { box-shadow: 0 0 16px rgba(0, 255, 136, 0.8); }
     }
-    /* Volatility Status badges for Radar */
-    .badge-trade {
-        background-color: #1b5e20;
-        color: #a5d6a7;
-        font-weight: bold;
-        border: 1px solid #2e7d32;
+    @keyframes pulse-glow-gold {
+        0% { box-shadow: 0 0 4px rgba(255, 215, 0, 0.4); }
+        100% { box-shadow: 0 0 16px rgba(255, 215, 0, 0.8); }
+    }
+
+    /* Signal Card Pulse Glow (Animations) */
+    .signal-pulse-card {
+        animation: signal-entry-glow 3s cubic-bezier(0.25, 0.8, 0.25, 1) forwards;
+    }
+    @keyframes signal-entry-glow {
+        0% {
+            border-color: #ffd700;
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.6);
+            transform: scale(1.02);
+        }
+        100% {
+            border-color: rgba(255, 215, 0, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transform: scale(1);
+        }
+    }
+
+    /* Shimmer Skeleton Loading Shimmer Effect */
+    .shimmer {
+        background: linear-gradient(90deg, #15152e 25%, #25254e 50%, #15152e 75%);
+        background-size: 200% 100%;
+        animation: loading-shimmer 1.5s infinite;
+        border-radius: 8px;
+        height: 18px;
+        margin: 10px 0;
+    }
+    @keyframes loading-shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    /* Live scrolling ticker styling */
+    .ticker-container {
+        overflow: hidden;
+        height: 400px;
+        position: relative;
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 12px;
+        background: rgba(10, 10, 25, 0.3);
+        padding: 10px;
+    }
+    .ticker-track {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        animation: ticker-vertical-scroll 25s linear infinite;
+    }
+    .ticker-track:hover {
+        animation-play-state: paused;
+    }
+    @keyframes ticker-vertical-scroll {
+        0% { transform: translateY(0); }
+        100% { transform: translateY(-50%); }
+    }
+
+    /* VIP Table hover styles */
+    .vip-table {
         width: 100%;
-        display: block;
+        border-collapse: collapse;
+        margin: 15px 0;
+        background: rgba(20, 20, 45, 0.2);
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.05);
     }
-    .badge-wait {
-        background-color: #37474f;
-        color: #b0bec5;
-        font-weight: bold;
-        border: 1px solid #455a64;
-        width: 100%;
-        display: block;
+    .vip-table th {
+        background: rgba(255, 215, 0, 0.05) !important;
+        color: #ffd700 !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        font-size: 0.8rem !important;
+        padding: 12px 16px !important;
+        border-bottom: 1px solid rgba(255,215,0,0.15) !important;
+        text-align: left;
     }
-    .badge-trend-up {
-        background-color: rgba(76, 175, 80, 0.15);
-        color: #4caf50;
-        border: 1px solid rgba(76, 175, 80, 0.3);
+    .vip-table td {
+        padding: 12px 16px !important;
+        border-bottom: 1px solid rgba(255,255,255,0.03) !important;
+        color: #cbd5e1 !important;
+        font-size: 0.85rem !important;
     }
-    .badge-trend-down {
-        background-color: rgba(244, 67, 54, 0.15);
-        color: #f44336;
-        border: 1px solid rgba(244, 67, 54, 0.3);
+    .vip-table tr:hover {
+        background: rgba(255, 215, 0, 0.03) !important;
     }
-    .badge-trend-neutral {
-        background-color: rgba(158, 158, 158, 0.15);
-        color: #9e9e9e;
-        border: 1px solid rgba(158, 158, 158, 0.3);
+    .tr-win {
+        background: rgba(0, 255, 136, 0.02) !important;
+    }
+    .tr-win:hover {
+        background: rgba(0, 255, 136, 0.05) !important;
+    }
+    .tr-loss {
+        background: rgba(255, 7, 58, 0.02) !important;
+    }
+    .tr-loss:hover {
+        background: rgba(255, 7, 58, 0.05) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1869,6 +2034,12 @@ if supabase_client is not None and "supabase_user" in st.session_state:
         latest_sig = st.session_state.signal_history[0]
         latest_sig_id = latest_sig["id"]
         
+        # Trigger Confetti if latest signal is a WIN and not already celebrated
+        if latest_sig.get("status") == "WIN":
+            if "last_confetti_sig_id" not in st.session_state or st.session_state.last_confetti_sig_id != latest_sig_id:
+                st.session_state.last_confetti_sig_id = latest_sig_id
+                trigger_confetti()
+                
         if "last_alerted_signal" not in st.session_state:
             st.session_state.last_alerted_signal = latest_sig_id
             
@@ -1882,32 +2053,77 @@ if supabase_client is not None and "supabase_user" in st.session_state:
                 st.toast(f"🔥 NEW CENTRAL SIGNAL DETECTED: {latest_sig['type']} on {latest_sig['pair'].replace('=X','')} [{latest_sig['timeframe']}]!", icon="🔊")
                 trigger_browser_beep()
 
-# Title
-st.title("⚡ BINARY PRO SCANNER V4 (SNIPER EDITION)")
-st.markdown("### `VIP-LEVEL TRADING STATION` | **ANTI-REPAINT**")
-st.info("🟢 **V4.2 Sniper Engine Active:** 24/7 background scanner is running directly in the cloud.")
+# Calculate live stats from Supabase
+today_sigs_count = 0
+win_rate = 0.0
+if supabase_client is not None:
+    try:
+        tz_ry = pytz.timezone("Asia/Riyadh")
+        now_ry = datetime.datetime.now(tz_ry)
+        start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
+        start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
+        
+        res_all = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).execute()
+        all_today_sigs = res_all.data if res_all.data else []
+        sig_15m = [s for s in all_today_sigs if s["timeframe"].upper() == "15M"]
+        today_sigs_count = len(sig_15m)
+        
+        resolved = [s for s in sig_15m if s["status"] in ["WIN", "LOSS"]]
+        wins = sum(1 for s in resolved if s["status"] == "WIN")
+        win_rate = (wins / len(resolved) * 100) if resolved else 0.0
+    except Exception:
+        pass
 
-# Calculate live session stats
-session_wins = sum(1 for sig in st.session_state.signal_history if sig["status"] == "WIN")
-session_losses = sum(1 for sig in st.session_state.signal_history if sig["status"] in ["LOSS", "TIE"])
-session_ties = sum(1 for sig in st.session_state.signal_history if sig["status"] == "TIE")
-session_total = session_wins + session_losses
-session_winrate = (session_wins / session_total) * 100 if session_total > 0 else 0.0
+# Calculate live background thread status
+import threading
+thread_alive = any(t.name == "scanner_thread_func" for t in threading.enumerate())
+thread_badge = '<span class="vip-badge vip-badge-win glow-green">ACTIVE</span>' if thread_alive else '<span class="vip-badge vip-badge-loss">DEAD</span>'
 
-# Render top stats banner
-col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-with col_stat1:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>Session Wins ✅</div><div class='metric-value' style='color:#00e676;'>{session_wins}</div></div>", unsafe_allow_html=True)
-with col_stat2:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>Session Losses ❌</div><div class='metric-value' style='color:#ff1744;'>{session_losses}</div></div>", unsafe_allow_html=True)
-with col_stat3:
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>Session Ties ⚪</div><div class='metric-value' style='color:#b0bec5;'>{session_ties}</div></div>", unsafe_allow_html=True)
-with col_stat4:
-    color_winrate = "#00e676" if session_winrate >= 60 else ("#ff9800" if session_winrate >= 40 else "#ff1744")
-    st.markdown(f"<div class='metric-card'><div class='metric-title'>Session Winrate 🎯</div><div class='metric-value' style='color:{color_winrate};'>{session_winrate:.1f}%</div></div>", unsafe_allow_html=True)
+# Calculate current session status (AST)
+now_ast = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
+session_type = local_get_session_type(now_ast)
+if session_type == "IN-SESSION":
+    session_badge = '<span class="vip-badge vip-badge-win glow-green">🟢 IN-SESSION</span>'
+else:
+    session_badge = '<span class="vip-badge vip-badge-loss">🔴 OFF-SESSION</span>'
 
-st.progress(session_winrate / 100.0 if session_total > 0 else 0.0, text=f"Live Accuracy Meter: {session_winrate:.1f}% Accuracy")
-st.markdown("<br>", unsafe_allow_html=True)
+# Top Header HTML
+now_clock = now_ast.strftime('%I:%M:%S %p')
+header_html = f"""
+<div class="vip-card" style="display: flex; justify-content: space-between; align-items: center; border-color: rgba(255, 215, 0, 0.3); margin-top: -50px;">
+    <div>
+        <h1 style="margin: 0; font-size: 2.2rem; font-weight: 800; background: linear-gradient(90deg, #ffd700 0%, #00ff88 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">⚡ BINARY PRO V4.2</h1>
+        <span style="font-size: 0.9rem; color: #94a3b8; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;">VIP SNIPER TRADING STATION</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <div style="text-align: right;">
+            <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Live Jeddah Clock</div>
+            <div style="font-size: 1.2rem; font-weight: 700; color: #ffffff; font-family: monospace;">{now_clock} AST</div>
+        </div>
+        {session_badge}
+    </div>
+</div>
+"""
+st.markdown(header_html, unsafe_allow_html=True)
+
+# KPI Cards HTML
+kpi_html = f"""
+<div class="kpi-container">
+    <div class="kpi-card kpi-accent-gold">
+        <div class="kpi-title">SIGNALS TODAY (15M)</div>
+        <div class="kpi-value">{today_sigs_count}</div>
+    </div>
+    <div class="kpi-card kpi-accent-green">
+        <div class="kpi-title">TODAY'S WIN RATE</div>
+        <div class="kpi-value">{win_rate:.1f}%</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-title">SCANNER DAEMON</div>
+        <div class="kpi-value" style="font-size: 1.5rem; margin-top: 10px;">{thread_badge}</div>
+    </div>
+</div>
+"""
+st.markdown(kpi_html, unsafe_allow_html=True)
 
 # Session & News Filters status warning checks (Global Checks)
 session_ok, session_msg = check_session_filter(True)
@@ -2167,13 +2383,15 @@ if radar_data:
         
         # Determine highlighting based on selection
         is_selected = pair_ticker == st.session_state.selected_pair
-        border_color = "#3b82f6" if is_selected else "#374151"
-        bg_color = "rgba(59, 130, 246, 0.15)" if is_selected else "#111827"
-        shadow = "box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);" if is_selected else ""
+        border_color = "rgba(0, 255, 136, 0.4)" if is_selected else "rgba(255, 255, 255, 0.05)"
+        bg_color = "rgba(0, 255, 136, 0.08)" if is_selected else "rgba(20, 20, 45, 0.45)"
+        shadow = "box-shadow: 0 0 15px rgba(0, 255, 136, 0.25);" if is_selected else "box-shadow: 0 4px 15px rgba(0,0,0,0.2);"
+        backdrop = "backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);"
         
         # Badges
-        trend_text = "🟢 BULLISH" if pair_info["trend"] == "UP" else ("🔴 BEARISH" if pair_info["trend"] == "DOWN" else "⚪ NEUTRAL")
-        status_bg = "#15803d" if pair_info["status"] == "TRADE NOW" else "#374151"
+        trend_text = '<span style="color:#00ff88; font-weight:700;">🟢 BULLISH</span>' if pair_info["trend"] == "UP" else ('<span style="color:#ff073a; font-weight:700;">🔴 BEARISH</span>' if pair_info["trend"] == "DOWN" else '<span style="color:#cbd5e1; font-weight:700;">⚪ NEUTRAL</span>')
+        status_bg = "linear-gradient(90deg, #00ff88, #00b0ff)" if pair_info["status"] == "TRADE NOW" else "rgba(255, 255, 255, 0.05)"
+        status_color = "#050510" if pair_info["status"] == "TRADE NOW" else "#94a3b8"
         
         rt_val = st.query_params.get("rt", "")
         link = f"/?pair={pair_ticker}"
@@ -2181,10 +2399,10 @@ if radar_data:
             link += f"&rt={rt_val}"
             
         card_html = f'<a href="{link}" target="_self" style="text-decoration: none; color: inherit; display: inline-block;">'
-        card_html += f'<div style="background-color: {bg_color}; border: 2px solid {border_color}; padding: 12px; border-radius: 8px; min-width: 140px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2); {shadow} transition: transform 0.2s;">'
-        card_html += f'<div style="font-weight: bold; font-size: 0.85rem; color: #f8fafc; margin-bottom: 4px;">{pair_name}</div>'
-        card_html += f'<div style="font-size: 0.75rem; font-weight: bold; margin-bottom: 8px;">{trend_text}</div>'
-        card_html += f'<div style="background-color: {status_bg}; color: #ffffff; font-size: 0.65rem; font-weight: bold; padding: 3px 8px; border-radius: 4px; display: inline-block;">{pair_info["status"]}</div>'
+        card_html += f'<div style="background-color: {bg_color}; border: 1px solid {border_color}; padding: 12px; border-radius: 12px; min-width: 140px; text-align: center; {shadow} {backdrop} transition: all 0.3s ease;">'
+        card_html += f'<div style="font-weight: 800; font-size: 0.9rem; color: #ffffff; margin-bottom: 6px; letter-spacing:0.05em;">{pair_name}</div>'
+        card_html += f'<div style="font-size: 0.75rem; margin-bottom: 8px;">{trend_text}</div>'
+        card_html += f'<div style="background: {status_bg}; color: {status_color}; font-size: 0.65rem; font-weight: 800; padding: 4px 10px; border-radius: 20px; display: inline-block; text-transform:uppercase; letter-spacing:0.05em;">{pair_info["status"]}</div>'
         card_html += '</div></a>'
         
         html_radar += card_html
@@ -2548,6 +2766,7 @@ with col_center:
                 st.markdown(f"**Mock State Verification:** MACD_Cross={macd_ok}, BB_Touch={bb_ok}, Volume_Spike={vol_ok}, Score={score}/5")
                 if score == 5:
                     st.success("🟢 **MACD:True BB:True VOL:True EMA:True Score:5/5 -> SIGNAL: CALL**")
+                    trigger_confetti()
                 else:
                     st.error(f"🔴 **RESULT: BLOCKED (Score was {score}/5)**")
             except Exception as ex:
@@ -2694,7 +2913,40 @@ with col_center:
                 st.error(f"Error loading post-mortem: {pm_e}")
                 
         if postmortem_list:
-            st.table(pd.DataFrame(postmortem_list))
+            html_pm = """
+            <table class="vip-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Pair</th>
+                        <th>Type</th>
+                        <th>Entry</th>
+                        <th>Result</th>
+                        <th>Confirmations</th>
+                        <th>Diagnostics</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for row in postmortem_list:
+                tr_class = "tr-win" if row["Result"] == "TP" else ("tr-loss" if row["Result"] == "SL" else "")
+                badge_class = "vip-badge-win" if row["Result"] == "TP" else ("vip-badge-loss" if row["Result"] == "SL" else "vip-badge-pending")
+                
+                type_color = "#00ff88" if row["Type"] == "CALL" else "#ff073a"
+                
+                html_pm += f"""
+                <tr class="{tr_class}">
+                    <td>{row['Time']}</td>
+                    <td style="font-weight:700;">{row['Pair']}</td>
+                    <td style="color:{type_color}; font-weight:700;">{row['Type']}</td>
+                    <td style="font-family:monospace;">{row['Entry']:.5f}</td>
+                    <td><span class="vip-badge {badge_class}">{row['Result']}</span></td>
+                    <td style="font-weight:600;">{row['Confirmations']}</td>
+                    <td style="font-size:0.8rem; color:#94a3b8;">{row['Diagnostics']}</td>
+                </tr>
+                """
+            html_pm += "</tbody></table>"
+            st.markdown(html_pm, unsafe_allow_html=True)
         else:
             st.info("No resolved signals in database to analyze.")
 
@@ -2712,44 +2964,50 @@ with col_right:
         st.caption(f"Signal Audit: {active_pair.replace('=X','')} [{timeframe}]")
         filtered_log = [sig for sig in st.session_state.signal_history if sig["pair"] == active_pair]
         
-        # Wrap logs feed inside a scrollable container matching other columns
+        # Wrap logs feed inside a premium vertical scrolling ticker container
         with st.container(height=450):
             if filtered_log:
-                html_right_table = """
-                <table style="width:100%; border-collapse: collapse; text-align: left; background-color: #111827; color:#e5e7eb; border-radius: 8px; overflow: hidden; font-size:0.8rem;">
-                    <thead>
-                        <tr style="background-color: #1f2937; border-bottom: 2px solid #374151;">
-                            <th style="padding: 8px 10px;">Time</th>
-                            <th style="padding: 8px 10px;">Type</th>
-                            <th style="padding: 8px 10px;">Confirmations</th>
-                            <th style="padding: 8px 10px;">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                """
-                for sig in reversed(filtered_log[-10:]):
-                    badge_type = f"<span class='badge badge-call' style='font-size:0.7rem;'>CALL</span>" if sig["type"] == "CALL" else f"<span class='badge badge-put' style='font-size:0.7rem;'>PUT</span>"
+                ticker_items_html = ""
+                # Get the latest 5 signals for the scrolling ticker
+                for sig in reversed(filtered_log[-5:]):
+                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                    badge_type = f"<span style='color:#00ff88; font-weight:bold;'>🟢 CALL</span>" if sig["type"] == "CALL" else f"<span style='color:#ff073a; font-weight:bold;'>🔴 PUT</span>"
                     
                     badge_status = ""
                     if sig["status"] == "WIN":
-                        badge_status = "<span class='badge badge-win' style='font-size:0.7rem;'>WIN</span>"
+                        badge_status = "<span class='vip-badge vip-badge-win'>WIN</span>"
                     elif sig["status"] == "LOSS":
-                        badge_status = "<span class='badge badge-loss' style='font-size:0.7rem;'>LOSS</span>"
+                        badge_status = "<span class='vip-badge vip-badge-loss'>LOSS</span>"
                     elif sig["status"] == "TIE":
-                        badge_status = "<span class='badge badge-tie' style='font-size:0.7rem;'>TIE</span>"
+                        badge_status = "<span class='vip-badge' style='background:rgba(255,255,255,0.05); color:#cfd8dc;'>TIE</span>"
                     else:
-                        badge_status = "<span class='badge badge-pending' style='font-size:0.7rem;'>PENDING</span>"
+                        badge_status = "<span class='vip-badge vip-badge-pending'>PENDING</span>"
                         
                     time_str = sig["time"].astimezone(pytz.timezone("Asia/Riyadh")).strftime("%I:%M %p")
                     
-                    html_right_table += f"""<tr style="border-bottom: 1px solid #374151;">
-<td style="padding: 8px 10px;">{time_str}</td>
-<td style="padding: 8px 10px;">{badge_type}</td>
-<td style="padding: 8px 10px; font-weight:600;">{sig["confirmations"]}</td>
-<td style="padding: 8px 10px;">{badge_status}</td>
-</tr>"""
-                html_right_table += "</tbody></table>"
-                st.markdown(html_right_table, unsafe_allow_html=True)
+                    ticker_items_html += f"""
+                    <div class="vip-card" style="margin-bottom:0 !important; padding: 12px !important; display:flex; justify-content:space-between; align-items:center; background:rgba(20, 20, 45, 0.4); border-color:rgba(255, 215, 0, 0.05);">
+                        <div>
+                            <div style="font-weight:700; font-size:0.9rem; color:#ffffff;">{pair_clean}</div>
+                            <div style="font-size:0.75rem; color:#94a3b8;">{time_str} ({sig['confirmations']}/5)</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div>{badge_type}</div>
+                            <div style="margin-top:4px;">{badge_status}</div>
+                        </div>
+                    </div>
+                    """
+                
+                # Render the infinite ticker loop
+                full_ticker_html = f"""
+                <div class="ticker-container">
+                    <div class="ticker-track">
+                        {ticker_items_html}
+                        {ticker_items_html}
+                    </div>
+                </div>
+                """
+                st.markdown(full_ticker_html, unsafe_allow_html=True)
                 
                 # CSV Export Button
                 try:
