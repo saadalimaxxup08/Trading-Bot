@@ -47,6 +47,7 @@ st.set_page_config(
 GLOBAL_SETTINGS = {
     "session_filter_enabled": True
 }
+session_filter_enabled = GLOBAL_SETTINGS["session_filter_enabled"]
 
 # Custom premium dark styling (VIP Trading Dashboard)
 st.markdown("""
