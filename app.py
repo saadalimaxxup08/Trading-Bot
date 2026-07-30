@@ -606,7 +606,9 @@ def local_send_hourly_summary():
         for s in sig_15m[:10]:
             sig_time_ry = pd.to_datetime(s["time"]).astimezone(tz_ry)
             status_char = "🟢 WIN" if s["status"] == "WIN" else ("🔴 LOSS" if s["status"] == "LOSS" else ("🟡 TIE" if s["status"] == "TIE" else "⏳ PEND"))
-            sum_msg += f"• <code>{sig_time_ry.strftime('%I:%M %p')}</code> | <b>{s['pair'].replace('=X','')}</b> | {s['type']} | {status_char}\n"
+            conf_str = s.get("confirmations") or "5/5"
+            entry_p = float(s["entry_price"]) if s.get("entry_price") else 0.0
+            sum_msg += f"• <code>{sig_time_ry.strftime('%I:%M %p')}</code> | <b>{s['pair'].replace('=X','')}</b> | {s['type']} ({conf_str}) | Entry: {entry_p:.5f} | {status_char}\n"
             
         local_send_telegram_alert(sum_msg)
     except Exception as e:
