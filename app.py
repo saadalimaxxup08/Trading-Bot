@@ -431,9 +431,11 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
         live_row = df_res.iloc[-2]
         
         sig_type = None
-        if live_row.get('Call_Score', 0) == 5:
+        call_score = int(live_row.get('Call_Score', 0))
+        put_score = int(live_row.get('Put_Score', 0))
+        if call_score == 5:
             sig_type = "CALL"
-        elif live_row.get('Put_Score', 0) == 5:
+        elif put_score == 5:
             sig_type = "PUT"
             
         if sig_type is None:
@@ -450,14 +452,88 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
         time_str_ast = f"{now_ast.strftime('%I:%M %p AST')} ({now_utc.strftime('%I:%M %p UTC')})"
         exit_time = closed_time + datetime.timedelta(minutes=15)
         
-        # Build diagnostics string
-        macd_val = live_row.get('MACD', 0)
-        signal_val = live_row.get('MACD_Signal', 0)
-        bb_lower_val = live_row.get('BB_Lower', 0)
-        bb_upper_val = live_row.get('BB_Upper', 0)
-        vol_val = live_row.get('Volume', 0)
-        rsi_val = live_row.get('RSI_14', 0)
+        # ── Extract ALL raw indicator values for detailed logging ──
+        macd_val = float(live_row.get('MACD', 0))
+        signal_val = float(live_row.get('MACD_Signal', 0))
+        bb_lower_val = float(live_row.get('BB_Lower', 0))
+        bb_upper_val = float(live_row.get('BB_Upper', 0))
+        bb_middle_val = float(live_row.get('BB_Middle', 0))
+        vol_val = float(live_row.get('Volume', 0))
+        rsi_val = float(live_row.get('RSI_14', 0))
+        ema50_val = float(live_row.get('EMA_50', 0))
+        ema200_val = float(live_row.get('EMA_200', 0))
+        ema_slope = float(live_row.get('EMA_200_Slope', 0))
+        atr_spike_flag = bool(live_row.get('ATR_Spike', False))
+        close_price = float(closed_candle['Close'])
+        open_price = float(closed_candle['Open'])
+        high_price = float(closed_candle['High'])
+        low_price = float(closed_candle['Low'])
         
+        # ── Compute individual rule booleans (mirror check_signals logic) ──
+        macd_prev = float(df_res['MACD'].iloc[-3]) if len(df_res) >= 3 else 0
+        signal_prev = float(df_res['MACD_Signal'].iloc[-3]) if len(df_res) >= 3 else 0
+        
+        macd_cross_call = (macd_prev <= signal_prev) and (macd_val > signal_val)
+        macd_cross_put = (macd_prev >= signal_prev) and (macd_val < signal_val)
+        macd_cross_ok = macd_cross_call if sig_type == "CALL" else macd_cross_put
+        
+        bb_touch_call = (low_price <= bb_lower_val) and (close_price > open_price)
+        bb_touch_put = (high_price >= bb_upper_val) and (close_price < open_price)
+        bb_touch_ok = bb_touch_call if sig_type == "CALL" else bb_touch_put
+        
+        # Volume spike: current > previous
+        vol_prev = float(df_pair['Volume'].iloc[-3]) if len(df_pair) >= 3 else 0
+        volume_spike_ok = vol_val > vol_prev
+        
+        ema200_slope_up = ema_slope > 0
+        
+        # Additional V4.2 filters that were checked
+        rsi_room_ok = (rsi_val < 45) if sig_type == "CALL" else (rsi_val > 55)
+        ema_trend_ok = (close_price > ema50_val or ema50_val > ema200_val) if sig_type == "CALL" else (close_price < ema50_val or ema50_val < ema200_val)
+        
+        # Pips multiplier for swing pivot check
+        is_jpy = "JPY" in str(pair)
+        pips_mult = 0.01 if is_jpy else 0.0001
+        ten_pips = 10 * pips_mult
+        swing_low_val = float(live_row.get('Swing_Low_20', 0))
+        swing_high_val = float(live_row.get('Swing_High_20', 0))
+        swing_pivot_ok = (abs(bb_lower_val - swing_low_val) <= ten_pips) if sig_type == "CALL" else (abs(bb_upper_val - swing_high_val) <= ten_pips)
+        
+        # ── Build structured reason_details JSON ──
+        reason_details = {
+            "direction": sig_type,
+            "call_score": call_score,
+            "put_score": put_score,
+            # Individual rule booleans
+            "macd_cross": macd_cross_ok,
+            "bb_touch": bb_touch_ok,
+            "volume_spike": volume_spike_ok,
+            "ema200_slope_up": ema200_slope_up,
+            "rsi_room_ok": rsi_room_ok,
+            "ema_trend_ok": ema_trend_ok,
+            "atr_spike": atr_spike_flag,
+            "swing_pivot_ok": swing_pivot_ok,
+            # Raw indicator values
+            "macd_value": round(macd_val, 6),
+            "macd_signal_value": round(signal_val, 6),
+            "bb_lower": round(bb_lower_val, 5),
+            "bb_upper": round(bb_upper_val, 5),
+            "bb_middle": round(bb_middle_val, 5),
+            "rsi_14": round(rsi_val, 2),
+            "ema_50": round(ema50_val, 5),
+            "ema_200": round(ema200_val, 5),
+            "ema_200_slope": round(ema_slope, 7),
+            "current_vol": round(vol_val, 0),
+            "prev_vol": round(vol_prev, 0),
+            # OHLC snapshot of the closed candle
+            "open": round(open_price, 5),
+            "high": round(high_price, 5),
+            "low": round(low_price, 5),
+            "close": round(close_price, 5),
+            "session_type": session_type
+        }
+        
+        # Legacy diagnostics string (backward compatible)
         diagnostics_str = f"Type: {sig_type} | MACD: {macd_val:.5f} (Signal: {signal_val:.5f}) | BB Lower: {bb_lower_val:.5f} (Upper: {bb_upper_val:.5f}) | Volume: {vol_val} | RSI: {rsi_val:.2f}"
         
         new_sig = {
@@ -466,33 +542,43 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
             "pair": pair,
             "timeframe": timeframe.upper(),  # Strictly "15M"
             "type": sig_type,
-            "entry_price": float(closed_candle['Close']),
+            "entry_price": close_price,
             "exit_time": exit_time.isoformat() if hasattr(exit_time, "isoformat") else str(exit_time),
             "exit_price": None,
             "status": "PENDING",
             "strength": "NORMAL",
             "confirmations": "5/5",
             "patterns": "None",
-            "diagnostics": diagnostics_str
+            "diagnostics": diagnostics_str,
+            "reason_details": reason_details
         }
         
         if supabase_client is not None:
             try:
                 supabase_client.table("signals").insert(new_sig).execute()
-                print(f"[DB Saved] Signal {sig_id}")
+                print(f"[DB Saved] Signal {sig_id} | reason_details stored")
             except Exception as dbi_e:
                 print(f"[DB Save Error] Failed to save {sig_id}: {dbi_e}")
                 
+        # ── Telegram alert with detailed reason breakdown ──
         dir_emoji = "🟢 CALL" if sig_type == "CALL" else "🔴 PUT"
+        rules_summary = (
+            f"• MACD Cross: {'✅' if macd_cross_ok else '❌'}\n"
+            f"• BB Touch: {'✅' if bb_touch_ok else '❌'}\n"
+            f"• Volume Spike: {'✅' if volume_spike_ok else '❌'}\n"
+            f"• EMA200 Slope: {'✅ Up' if ema200_slope_up else '❌ Down'}\n"
+            f"• RSI Room: {'✅' if rsi_room_ok else '❌'} ({rsi_val:.1f})\n"
+            f"• EMA Trend: {'✅' if ema_trend_ok else '❌'}"
+        )
         alert_msg = f"✅ <b>V4.2 SNIPER SIGNAL DETECTED</b>\n\n" \
                     f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                     f"<b>Direction:</b> {dir_emoji}\n" \
+                    f"<b>Entry Price:</b> {close_price:.5f}\n" \
                     f"<b>Session:</b> 🟢 IN-SESSION\n" \
                     f"<b>Entry Time:</b> {time_str_ast}\n" \
-                    f"<b>Expiry:</b> 15 Minutes\n" \
-                    f"<b>Reason:</b> All 5 Confirmations + V4.2 Filters Passed\n" \
-                    f"<b>Risk:</b> Low\n\n" \
-                    f"<i>Diagnostics: {diagnostics_str}</i>"
+                    f"<b>Expiry:</b> 15 Minutes\n\n" \
+                    f"<b>📋 Rule Breakdown (5/5):</b>\n{rules_summary}\n\n" \
+                    f"<b>Risk:</b> Low"
         local_send_telegram_alert(alert_msg)
         
         st._processed_signals.add(sig_id)
@@ -549,22 +635,48 @@ def local_resolve_pending_signals():
                         status = "WIN"
                     elif exit_price > entry_price:
                         status = "LOSS"
-                        
-                supabase_client.table("signals").update({
-                    "exit_price": exit_price,
-                    "status": status
-                }).eq("id", sig["id"]).execute()
                 
+                # ── Calculate PnL in pips ──
+                is_jpy = "JPY" in str(pair)
+                pip_divisor = 0.01 if is_jpy else 0.0001
+                raw_diff = exit_price - entry_price
+                if sig_type == "PUT":
+                    raw_diff = -raw_diff  # For PUT, profit = entry - exit
+                pnl_pips = round(raw_diff / pip_divisor, 1)
+                
+                resolved_at_utc = datetime.datetime.now(pytz.utc).isoformat()
+                
+                update_payload = {
+                    "exit_price": exit_price,
+                    "status": status,
+                    "pnl_pips": pnl_pips,
+                    "resolved_at": resolved_at_utc
+                }
+                supabase_client.table("signals").update(update_payload).eq("id", sig["id"]).execute()
+                
+                # ── Build detailed outcome message ──
                 status_emoji = "🟢 WIN" if status == "WIN" else ("🔴 LOSS" if status == "LOSS" else "🟡 TIE")
+                pips_str = f"+{pnl_pips}" if pnl_pips > 0 else str(pnl_pips)
+                
+                # Why did it win/lose?
+                if status == "WIN":
+                    reason_str = f"Price moved {abs(pnl_pips):.1f} pips in favor ({'up' if sig_type == 'CALL' else 'down'})"
+                elif status == "LOSS":
+                    reason_str = f"Price moved {abs(pnl_pips):.1f} pips against ({'down' if sig_type == 'CALL' else 'up'})"
+                else:
+                    reason_str = "Price unchanged at expiry"
+                
                 outcome_msg = f"📉 <b>TRADE RESOLVED ({status})</b>\n\n" \
                               f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                               f"<b>Type:</b> {sig_type}\n" \
                               f"<b>Entry Price:</b> {entry_price:.5f}\n" \
                               f"<b>Exit Price:</b> {exit_price:.5f}\n" \
+                              f"<b>P/L:</b> {pips_str} pips\n" \
                               f"<b>Status:</b> {status_emoji}\n" \
+                              f"<b>Why:</b> {reason_str}\n" \
                               f"<b>Resolved Time:</b> {actual_exit_time.astimezone(pytz.timezone('Asia/Riyadh')).strftime('%I:%M %p AST')}"
                 local_send_telegram_alert(outcome_msg)
-                print(f"[RESOLVED] {sig['id']} -> {status}")
+                print(f"[RESOLVED] {sig['id']} -> {status} | {pips_str} pips")
     except Exception as e:
         print(f"[local_resolve_pending_signals Error]: {e}")
 
@@ -600,15 +712,41 @@ def local_send_hourly_summary():
                   f"<b>Stats (15M Timeframe):</b>\n" \
                   f"• Wins: {wins} | Losses: {losses} | Ties: {ties}\n" \
                   f"• Pending: {pending}\n" \
-                  f"• Win Rate: <b>{win_rate:.1f}%</b>\n\n" \
-                  f"<b>Trades Detail:</b>\n"
+                  f"• Win Rate: <b>{win_rate:.1f}%</b>\n"
+        
+        # ── Total Pips P/L ──
+        resolved_sigs = [s for s in sig_15m if s.get("pnl_pips") is not None]
+        if resolved_sigs:
+            total_pips = sum(float(s["pnl_pips"]) for s in resolved_sigs)
+            pips_emoji = "📈" if total_pips >= 0 else "📉"
+            sum_msg += f"• {pips_emoji} Total Pips: <b>{total_pips:+.1f}</b>\n"
+        
+        # ── Per-Pair Breakdown ──
+        pairs_seen = {}
+        for s in sig_15m:
+            p = s["pair"].replace("=X", "")
+            if p not in pairs_seen:
+                pairs_seen[p] = {"w": 0, "l": 0, "pips": 0.0}
+            if s["status"] == "WIN":
+                pairs_seen[p]["w"] += 1
+            elif s["status"] == "LOSS":
+                pairs_seen[p]["l"] += 1
+            if s.get("pnl_pips") is not None:
+                pairs_seen[p]["pips"] += float(s["pnl_pips"])
+        
+        if pairs_seen:
+            sum_msg += f"\n<b>Per-Pair Breakdown:</b>\n"
+            for p_name, p_stats in pairs_seen.items():
+                sum_msg += f"• {p_name}: {p_stats['w']}W/{p_stats['l']}L ({p_stats['pips']:+.1f} pips)\n"
+        
+        sum_msg += f"\n<b>Trades Detail:</b>\n"
                   
         for s in sig_15m[:10]:
             sig_time_ry = pd.to_datetime(s["time"]).astimezone(tz_ry)
-            status_char = "🟢 WIN" if s["status"] == "WIN" else ("🔴 LOSS" if s["status"] == "LOSS" else ("🟡 TIE" if s["status"] == "TIE" else "⏳ PEND"))
-            conf_str = s.get("confirmations") or "5/5"
+            status_char = "🟢" if s["status"] == "WIN" else ("🔴" if s["status"] == "LOSS" else ("🟡" if s["status"] == "TIE" else "⏳"))
+            pips_info = f" ({float(s['pnl_pips']):+.1f}p)" if s.get("pnl_pips") is not None else ""
             entry_p = float(s["entry_price"]) if s.get("entry_price") else 0.0
-            sum_msg += f"• <code>{sig_time_ry.strftime('%I:%M %p')}</code> | <b>{s['pair'].replace('=X','')}</b> | {s['type']} ({conf_str}) | Entry: {entry_p:.5f} | {status_char}\n"
+            sum_msg += f"• <code>{sig_time_ry.strftime('%I:%M %p')}</code> | <b>{s['pair'].replace('=X','')}</b> | {s['type']} | {entry_p:.5f} | {status_char}{pips_info}\n"
             
         local_send_telegram_alert(sum_msg)
     except Exception as e:
@@ -632,14 +770,62 @@ def local_send_daily_summary():
         
         win_rate = (wins / total * 100) if total > 0 else 0.0
         
+        # ── Pips totals ──
+        resolved_sigs = [s for s in sig_15m if s.get("pnl_pips") is not None]
+        total_pips = sum(float(s["pnl_pips"]) for s in resolved_sigs) if resolved_sigs else 0.0
+        avg_win_pips = 0.0
+        avg_loss_pips = 0.0
+        win_sigs = [s for s in resolved_sigs if s["status"] == "WIN"]
+        loss_sigs = [s for s in resolved_sigs if s["status"] == "LOSS"]
+        if win_sigs:
+            avg_win_pips = sum(float(s["pnl_pips"]) for s in win_sigs) / len(win_sigs)
+        if loss_sigs:
+            avg_loss_pips = sum(float(s["pnl_pips"]) for s in loss_sigs) / len(loss_sigs)
+        
         daily_msg = f"🏆 <b>DAILY SNAPSHOT PERFORMANCE (9:00 PM AST)</b>\n\n" \
                     f"<b>24h Summary (15M Timeframe):</b>\n" \
                     f"• Total Trades: {total}\n" \
-                    f"• Wins: {wins}\n" \
-                    f"• Losses: {losses}\n" \
-                    f"• Ties: {ties}\n" \
-                    f"• Realized Win Rate: <b>{win_rate:.1f}%</b>\n\n" \
-                    f"<i>Congratulations! Let's continue building V4.2 Sniper success.</i>"
+                    f"• Wins: {wins} | Losses: {losses} | Ties: {ties}\n" \
+                    f"• Win Rate: <b>{win_rate:.1f}%</b>\n" \
+                    f"• Total Pips: <b>{total_pips:+.1f}</b>\n" \
+                    f"• Avg Win: {avg_win_pips:+.1f} pips | Avg Loss: {avg_loss_pips:.1f} pips\n"
+        
+        # ── Per-Pair Performance ──
+        pairs_stats = {}
+        for s in sig_15m:
+            p = s["pair"].replace("=X", "")
+            if p not in pairs_stats:
+                pairs_stats[p] = {"w": 0, "l": 0, "t": 0, "pips": 0.0}
+            if s["status"] == "WIN":
+                pairs_stats[p]["w"] += 1
+            elif s["status"] == "LOSS":
+                pairs_stats[p]["l"] += 1
+            elif s["status"] == "TIE":
+                pairs_stats[p]["t"] += 1
+            if s.get("pnl_pips") is not None:
+                pairs_stats[p]["pips"] += float(s["pnl_pips"])
+        
+        if pairs_stats:
+            daily_msg += f"\n<b>📊 Per-Pair Stats:</b>\n"
+            # Sort by pips descending (best first)
+            for p_name, ps in sorted(pairs_stats.items(), key=lambda x: x[1]["pips"], reverse=True):
+                p_total = ps["w"] + ps["l"] + ps["t"]
+                p_wr = (ps["w"] / p_total * 100) if p_total > 0 else 0
+                daily_msg += f"• {p_name}: {ps['w']}W/{ps['l']}L/{ps['t']}T | WR: {p_wr:.0f}% | {ps['pips']:+.1f}p\n"
+        
+        # ── Rule-wise Accuracy Analysis (from reason_details) ──
+        sigs_with_reasons = [s for s in sig_15m if s.get("reason_details") and s["status"] in ("WIN", "LOSS")]
+        if sigs_with_reasons:
+            rules = ["macd_cross", "bb_touch", "volume_spike", "ema200_slope_up", "rsi_room_ok", "ema_trend_ok"]
+            daily_msg += f"\n<b>🔬 Rule Analysis ({len(sigs_with_reasons)} trades):</b>\n"
+            for rule in rules:
+                true_count = sum(1 for s in sigs_with_reasons if s["reason_details"].get(rule, False))
+                true_wins = sum(1 for s in sigs_with_reasons if s["reason_details"].get(rule, False) and s["status"] == "WIN")
+                rule_wr = (true_wins / true_count * 100) if true_count > 0 else 0
+                rule_label = rule.replace("_", " ").title()
+                daily_msg += f"• {rule_label}: {true_count}/{len(sigs_with_reasons)} active | WR: {rule_wr:.0f}%\n"
+        
+        daily_msg += f"\n<i>V4.2 Sniper Engine — Detailed analytics powered by reason_details logging.</i>"
         local_send_telegram_alert(daily_msg)
     except Exception as e:
         print(f"[local_send_daily_summary Error]: {e}")
@@ -993,6 +1179,9 @@ def save_signal_to_db(sig):
             "confirmations": sig["confirmations"],
             "patterns": sig["patterns"]
         }
+        # Include reason_details if available
+        if sig.get("reason_details"):
+            sig_data["reason_details"] = sig["reason_details"]
         supabase_client.table("signals").insert(sig_data).execute()
     except Exception as e:
         print(f"Failed to save signal to database: {e}")
@@ -1005,6 +1194,11 @@ def update_signal_in_db(sig):
             "exit_price": float(sig["exit_price"]) if sig["exit_price"] is not None else None,
             "status": sig["status"]
         }
+        # Include pnl_pips and resolved_at if available
+        if sig.get("pnl_pips") is not None:
+            payload["pnl_pips"] = sig["pnl_pips"]
+        if sig.get("resolved_at"):
+            payload["resolved_at"] = sig["resolved_at"]
         supabase_client.table("signals").update(payload).eq("id", sig["id"]).execute()
     except Exception as e:
         print(f"Failed to update signal in database: {e}")
