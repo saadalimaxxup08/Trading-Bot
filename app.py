@@ -1214,10 +1214,12 @@ def start_background_scanner():
                             print(f"Error calculating 6h stats for heartbeat: {e_6h}")
                             
                     active_provider = settings_manager.get_active_data_source()
+                    active_host = settings_manager.get_active_host()
                     if db_ok and tg_ok and data_provider_ok and thread_alive:
                         status_msg = "🟢 <b>SYSTEM OK: Scanner Alive</b>\n\n" \
                                      "• Supabase DB: Connected\n" \
-                                     f"• Data Provider ({active_provider}): Online\n" \
+                                     f"• Data Provider: {active_provider}\n" \
+                                     f"• Designated Server: {active_host}\n" \
                                      "• Telegram Bot: Valid\n" \
                                      f"• Last 6H: {total_6h} Signals\n" \
                                      f"• WR: <b>{wr_6h:.1f}%</b>"
@@ -1226,7 +1228,8 @@ def start_background_scanner():
                         alert_msg = "🚨 <b>SYSTEM ALERT: Diagnostics Failure!</b>\n\n" \
                                     f"• Scanner Thread: {'🟢 Alive' if thread_alive else '🔴 DEAD'}\n" \
                                     f"• Supabase DB: {'🟢 Connected' if db_ok else '🔴 FAILED'}\n" \
-                                    f"• Data Provider ({active_provider}): {'🟢 Online' if data_provider_ok else '🔴 OFFLINE'}\n" \
+                                    f"• Data Provider: {active_provider} ({'🟢 Online' if data_provider_ok else '🔴 OFFLINE'})\n" \
+                                    f"• Designated Server: {active_host}\n" \
                                     f"• Telegram Bot: {'🟢 Valid' if tg_ok else '🔴 INVALID'}"
                         local_send_telegram_alert(alert_msg)
                         
