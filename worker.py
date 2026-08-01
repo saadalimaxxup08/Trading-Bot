@@ -124,9 +124,9 @@ supabase_client = get_supabase_client()
 def get_active_sessions_string():
     import datetime
     import pytz
-    pkt = pytz.timezone('Asia/Riyadh')
-    now_pkt = datetime.datetime.now(pkt)
-    current_time = now_pkt.time()
+    ast = pytz.timezone('Asia/Riyadh')
+    now_ast = datetime.datetime.now(ast)
+    current_time = now_ast.time()
     
     active = []
     # Sydney: 01:00 to 10:00 AST
@@ -233,10 +233,10 @@ def send_daily_summary():
         msg = f"📊 <b>DAILY PERFORMANCE REPORT - {date_str}</b>\n\n"
         
         msg += f"<b>--- 🟢 IN-SESSION RESULTS ---</b>\n"
-        msg += f"Time: 12PM-12AM PKT | Signals: {in_total} | Wins: {in_wins} | Losses: {in_losses} | Winrate: {in_winrate:.1f}% | Profit: ${in_profit:+.2f}\n\n"
+        msg += f"Time: 10AM-10PM AST | Signals: {in_total} | Wins: {in_wins} | Losses: {in_losses} | Winrate: {in_winrate:.1f}% | Profit: ${in_profit:+.2f}\n\n"
         
         msg += f"<b>--- 🟡 OFF-SESSION RESULTS ---</b>\n"
-        msg += f"Time: 12AM-12PM PKT | Signals: {off_total} | Wins: {off_wins} | Losses: {off_losses} | Winrate: {off_winrate:.1f}% | Profit: ${off_profit:+.2f}\n\n"
+        msg += f"Time: 10PM-10AM AST | Signals: {off_total} | Wins: {off_wins} | Losses: {off_losses} | Winrate: {off_winrate:.1f}% | Profit: ${off_profit:+.2f}\n\n"
         
         msg += f"<b>--- OVERALL TOTAL ---</b>\n"
         msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}% | Net Profit: ${overall_profit:+.2f}\n\n"
@@ -589,22 +589,19 @@ def generate_diagnostics_string(closed_candle, pair, timeframe, sig_type):
 
 def get_session_type(time_val):
     """
-    Checks if time_val (tz-aware or naive) is within 12:00 PM PKT to 12:00 AM PKT
-    (12:00 to 23:59:59 in PKT). Returns 'IN-SESSION' or 'OFF-SESSION'.
+    Checks if time_val (tz-aware or naive) is within 10:00 AM AST to 10:00 PM AST (Jeddah Time).
+    (10:00 to 22:00 in AST). Returns 'IN-SESSION' or 'OFF-SESSION'.
     """
     import pytz
-    pkt_tz = pytz.timezone('Asia/Karachi')
+    ast_tz = pytz.timezone('Asia/Riyadh')
     # If naive, assume it is UTC as per standard DB timestamps
     if time_val.tzinfo is None:
-        time_val_pkt = pytz.utc.localize(time_val).astimezone(pkt_tz)
+        time_val_ast = pytz.utc.localize(time_val).astimezone(ast_tz)
     else:
-        time_val_pkt = time_val.astimezone(pkt_tz)
+        time_val_ast = time_val.astimezone(ast_tz)
     
-    current_time = time_val_pkt.time()
-    start_time = datetime.time(12, 0)
-    end_time = datetime.time(23, 59, 59)
-    
-    if start_time <= current_time <= end_time:
+    current_hour = time_val_ast.hour
+    if 10 <= current_hour < 22:
         return "IN-SESSION"
     return "OFF-SESSION"
 
@@ -1056,10 +1053,10 @@ def process_market_signals(pair, timeframe):
             closed_candle = df.iloc[-2]
             closed_candle_time = df.index[-2]
         
-        # Determine current PKT time for logging
-        pkt_tz = pytz.timezone("Asia/Karachi")
-        pkt_now = datetime.datetime.now(pkt_tz)
-        pkt_time_str = pkt_now.strftime("%H:%M PKT")
+        # Determine current AST time for logging
+        ast_tz = pytz.timezone("Asia/Riyadh")
+        ast_now = datetime.datetime.now(ast_tz)
+        ast_time_str = ast_now.strftime("%H:%M AST")
         
         session_type = get_session_type(closed_candle_time)
         session_label = "IN-SESSION" if session_type == "IN-SESSION" else "OFF-SESSION"
@@ -1078,7 +1075,7 @@ def process_market_signals(pair, timeframe):
         else:
             reason = get_scan_rejection_reason(closed_candle, pair, timeframe)
             
-        print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {pkt_time_str} - Session: {session_label} - Score: {max_score}/5 - REASON BLOCKED: {reason}")
+        print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {ast_time_str} - Session: {session_label} - Score: {max_score}/5 - REASON BLOCKED: {reason}")
 
         # Prevent double-processing the same candle
         key = (pair, timeframe)
@@ -1162,22 +1159,22 @@ def process_market_signals(pair, timeframe):
             success = save_signal_to_db(new_sig)
             if success:
                 save_trade_log_to_db(new_sig, closed_candle, session_type, is_marubozu)
-                # Convert closed_candle_time to Karachi PKT and UTC
-                pkt_tz = pytz.timezone("Asia/Karachi")
+                # Convert closed_candle_time to Riyadh AST and UTC
+                ast_tz = pytz.timezone("Asia/Riyadh")
                 if closed_candle_time.tzinfo is not None:
-                    closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
+                    closed_candle_time_ast = closed_candle_time.astimezone(ast_tz)
                 else:
-                    closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
+                    closed_candle_time_ast = pytz.utc.localize(closed_candle_time).astimezone(ast_tz)
                 
-                closed_candle_time_utc = closed_candle_time_pkt.astimezone(pytz.utc)
+                closed_candle_time_utc = closed_candle_time_ast.astimezone(pytz.utc)
                 
                 # Trade Entry Time is when the signal candle ends
-                trade_entry_time_pkt = closed_candle_time_pkt + delta_t
+                trade_entry_time_ast = closed_candle_time_ast + delta_t
                 trade_entry_time_utc = closed_candle_time_utc + delta_t
                 
-                trade_entry_pkt_str = trade_entry_time_pkt.strftime("%I:%M %p PKT")
+                trade_entry_ast_str = trade_entry_time_ast.strftime("%I:%M %p AST")
                 trade_entry_utc_str = trade_entry_time_utc.strftime("%I:%M %p UTC")
-                trade_entry_display = f"{trade_entry_pkt_str} ({trade_entry_utc_str})"
+                trade_entry_display = f"{trade_entry_ast_str} ({trade_entry_utc_str})"
                 
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_display}")
                 
@@ -1312,22 +1309,22 @@ def process_market_signals_prefetched(pair, timeframe, df):
             success = save_signal_to_db(new_sig)
             if success:
                 save_trade_log_to_db(new_sig, closed_candle, session_type, is_marubozu)
-                # Convert closed_candle_time to Karachi PKT and UTC
-                pkt_tz = pytz.timezone("Asia/Karachi")
+                # Convert closed_candle_time to Riyadh AST and UTC
+                ast_tz = pytz.timezone("Asia/Riyadh")
                 if closed_candle_time.tzinfo is not None:
-                    closed_candle_time_pkt = closed_candle_time.astimezone(pkt_tz)
+                    closed_candle_time_ast = closed_candle_time.astimezone(ast_tz)
                 else:
-                    closed_candle_time_pkt = pytz.utc.localize(closed_candle_time).astimezone(pkt_tz)
+                    closed_candle_time_ast = pytz.utc.localize(closed_candle_time).astimezone(ast_tz)
                 
-                closed_candle_time_utc = closed_candle_time_pkt.astimezone(pytz.utc)
+                closed_candle_time_utc = closed_candle_time_ast.astimezone(pytz.utc)
                 
                 # Trade Entry Time is when the signal candle ends
-                trade_entry_time_pkt = closed_candle_time_pkt + delta_t
+                trade_entry_time_ast = closed_candle_time_ast + delta_t
                 trade_entry_time_utc = closed_candle_time_utc + delta_t
                 
-                trade_entry_pkt_str = trade_entry_time_pkt.strftime("%I:%M %p PKT")
+                trade_entry_ast_str = trade_entry_time_ast.strftime("%I:%M %p AST")
                 trade_entry_utc_str = trade_entry_time_utc.strftime("%I:%M %p UTC")
-                trade_entry_display = f"{trade_entry_pkt_str} ({trade_entry_utc_str})"
+                trade_entry_display = f"{trade_entry_ast_str} ({trade_entry_utc_str})"
                 
                 print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_display}")
                 
@@ -1559,11 +1556,11 @@ if __name__ == "__main__":
                 if LAST_DEBUG_REPORT_TIME is None or (now_time - LAST_DEBUG_REPORT_TIME).total_seconds() >= 900:
                     LAST_DEBUG_REPORT_TIME = now_time
                     three_score_count = sum(1 for p, score in LAST_SCAN_SCORES.items() if score == 3)
-                    pkt_tz = pytz.timezone("Asia/Karachi")
-                    pkt_now = now_time.astimezone(pkt_tz) if now_time.tzinfo else pytz.utc.localize(now_time).astimezone(pkt_tz)
-                    time_pkt_str = pkt_now.strftime("%I:%M %p PKT")
-                    debug_msg = f"ℹ️ <b>Bot Alive - Scanning 8 pairs.</b>\n" \
-                                f"Last scan time: {time_pkt_str}\n" \
+                    ast_tz = pytz.timezone("Asia/Riyadh")
+                    ast_now = now_time.astimezone(ast_tz) if now_time.tzinfo else pytz.utc.localize(now_time).astimezone(ast_tz)
+                    time_ast_str = ast_now.strftime("%I:%M %p AST")
+                    debug_msg = f"ℹ️ <b>Bot Alive - Scanning {len(RADAR_PAIRS)} pairs.</b>\n" \
+                                f"Last scan time: {time_ast_str}\n" \
                                 f"Signals found with 3/5 score: {three_score_count}"
                     send_telegram_alert(debug_msg)
             

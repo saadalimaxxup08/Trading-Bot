@@ -1060,9 +1060,9 @@ def start_background_scanner():
                                                             sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
                                                         
                                                         # Format and send Pre-Alert to Telegram
-                                                        now_pkt = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
-                                                        now_utc = now_pkt.astimezone(pytz.utc)
-                                                        pre_time_str = f"{now_pkt.strftime('%I:%M:%S %p PKT')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
+                                                        now_ast = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
+                                                        now_utc = now_ast.astimezone(pytz.utc)
+                                                        pre_time_str = f"{now_ast.strftime('%I:%M:%S %p AST')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
                                                         pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
                                                         pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
                                                                   f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
@@ -1097,9 +1097,9 @@ def start_background_scanner():
                                         sent_pre_alerts.pop(pre_key, None)
                                     else:
                                         # Signal failed to confirm! Send cancel alert
-                                        now_pkt = datetime.datetime.now(pytz.timezone("Asia/Karachi"))
-                                        now_utc = now_pkt.astimezone(pytz.utc)
-                                        cancel_time_str = f"{now_pkt.strftime('%I:%M:%S %p PKT')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
+                                        now_ast = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
+                                        now_utc = now_ast.astimezone(pytz.utc)
+                                        cancel_time_str = f"{now_ast.strftime('%I:%M:%S %p AST')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
                                         cancel_msg = f"❌ <b>SIGNAL CANCELLED</b>\n\n" \
                                                      f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                                                      f"<b>Direction:</b> {pre_dir}\n" \
@@ -1808,17 +1808,17 @@ def check_session_filter(enabled=True):
     if not enabled:
         return True, ""
     
-    pkt_tz = pytz.timezone('Asia/Karachi')
-    now_pkt = datetime.datetime.now(pkt_tz)
-    current_time = now_pkt.time()
+    ast_tz = pytz.timezone('Asia/Riyadh')
+    now_ast = datetime.datetime.now(ast_tz)
+    current_time = now_ast.time()
     
-    start_time = datetime.time(12, 0)
-    end_time = datetime.time(23, 59, 59)
+    start_time = datetime.time(10, 0)
+    end_time = datetime.time(22, 0)
     
-    in_session = start_time <= current_time <= end_time
-    time_str = now_pkt.strftime("%I:%M %p PKT")
+    in_session = start_time <= current_time < end_time
+    time_str = now_ast.strftime("%I:%M %p AST")
     
-    return in_session, f"Current PKT: {time_str} (Bot scans only: 12:00 PM - 12:00 AM PKT)"
+    return in_session, f"Current AST: {time_str} (Bot scans only: 10:00 AM - 10:00 PM AST)"
 
 # ----------------- TECHNICAL INDICATORS MODULE -----------------
 def calculate_atr(df, period=14):
