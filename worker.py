@@ -1544,8 +1544,10 @@ if __name__ == "__main__":
             for timeframe in TIMEFRAMES:
                 for pair in RADAR_PAIRS:
                     process_market_signals(pair, timeframe)
-                    # Small throttle to prevent yfinance block during scan
-                    time.sleep(1.5)
+                    # Speed up scan for Deriv WebSocket (no rate limit issues), throttle yfinance
+                    active_source = settings_manager.get_active_data_source()
+                    throttle = 0.1 if active_source == "Deriv WebSocket" else 1.5
+                    time.sleep(throttle)
             
             # Resolve pending items
             resolve_pending_signals()
