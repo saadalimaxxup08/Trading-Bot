@@ -47,6 +47,7 @@ st.set_page_config(
 )
 
 DERIV_SYMBOL_MAP = {
+    # Forex Majors
     "EURUSD=X": "frxEURUSD",
     "GBPUSD=X": "frxGBPUSD",
     "USDJPY=X": "frxUSDJPY",
@@ -54,7 +55,48 @@ DERIV_SYMBOL_MAP = {
     "USDCAD=X": "frxUSDCAD",
     "USDCHF=X": "frxUSDCHF",
     "EURGBP=X": "frxEURGBP",
-    "EURJPY=X": "frxEURJPY"
+    "EURJPY=X": "frxEURJPY",
+    "GBPJPY=X": "frxGBPJPY",
+    
+    # Forex Minors
+    "AUDCAD=X": "frxAUDCAD",
+    "AUDCHF=X": "frxAUDCHF",
+    "AUDJPY=X": "frxAUDJPY",
+    "AUDNZD=X": "frxAUDNZD",
+    "EURAUD=X": "frxEURAUD",
+    "EURCAD=X": "frxEURCAD",
+    "EURCHF=X": "frxEURCHF",
+    "GBPAUD=X": "frxGBPAUD",
+    "GBPCAD=X": "frxGBPCAD",
+    "NZDUSD=X": "frxNZDUSD",
+    
+    # Cryptocurrencies
+    "BTC-USD": "cryBTCUSD",
+    "ETH-USD": "cryETHUSD",
+    "LTC-USD": "cryLTCUSD",
+    
+    # Commodities & Metals
+    "GC=F": "frxXAUUSD",
+    "SI=F": "frxXAGUSD",
+    "CL=F": "frxUKOIL",
+    
+    # Synthetic Indices (Deriv Only)
+    "VOL_10": "R_10",
+    "VOL_25": "R_25",
+    "VOL_50": "R_50",
+    "VOL_75": "R_75",
+    "VOL_100": "R_100",
+    "VOL_10_1S": "1HZ10V",
+    "VOL_25_1S": "1HZ25V",
+    "VOL_50_1S": "1HZ50V",
+    "VOL_75_1S": "1HZ75V",
+    "VOL_100_1S": "1HZ100V",
+    "CRASH_300": "C300",
+    "BOOM_300": "B300",
+    "CRASH_500": "C500",
+    "BOOM_500": "B500",
+    "CRASH_1000": "C1000",
+    "BOOM_1000": "B1000"
 }
 
 async def _fetch_deriv_candles_async(symbol, granularity_seconds, count):
@@ -1596,15 +1638,27 @@ else:
 
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X"
+    # Forex Majors
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X", "GBPJPY=X",
+    # Forex Minors
+    "AUDCAD=X", "AUDCHF=X", "AUDJPY=X", "AUDNZD=X", "EURAUD=X", "EURCAD=X", "EURCHF=X", "GBPAUD=X", "GBPCAD=X", "NZDUSD=X",
+    # Cryptocurrencies
+    "BTC-USD", "ETH-USD", "LTC-USD",
+    # Commodities
+    "GC=F", "SI=F", "CL=F",
+    # Synthetic Indices (Deriv Only)
+    "VOL_10", "VOL_25", "VOL_50", "VOL_75", "VOL_100",
+    "VOL_10_1S", "VOL_25_1S", "VOL_50_1S", "VOL_75_1S", "VOL_100_1S",
+    "CRASH_300", "BOOM_300", "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
 ]
 
 # Tier-Based Pair Matrix
 TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
-TIER_2_PAIRS = ["USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X"]
+TIER_2_PAIRS = [p for p in RADAR_PAIRS if p not in TIER_1_PAIRS]
 
 # Scaled volatility thresholds lookup
 ATR_THRESHOLDS = {
+    # Forex Majors
     "EURUSD=X": 0.00005,
     "GBPUSD=X": 0.00005,
     "USDJPY=X": 0.01,
@@ -1612,7 +1666,48 @@ ATR_THRESHOLDS = {
     "USDCAD=X": 0.00005,
     "USDCHF=X": 0.00005,
     "EURGBP=X": 0.00005,
-    "EURJPY=X": 0.01
+    "EURJPY=X": 0.01,
+    "GBPJPY=X": 0.01,
+    
+    # Forex Minors
+    "AUDCAD=X": 0.00005,
+    "AUDCHF=X": 0.00005,
+    "AUDJPY=X": 0.01,
+    "AUDNZD=X": 0.00005,
+    "EURAUD=X": 0.00005,
+    "EURCAD=X": 0.00005,
+    "EURCHF=X": 0.00005,
+    "GBPAUD=X": 0.00005,
+    "GBPCAD=X": 0.00005,
+    "NZDUSD=X": 0.00005,
+    
+    # Cryptocurrencies
+    "BTC-USD": 5.0,
+    "ETH-USD": 0.5,
+    "LTC-USD": 0.05,
+    
+    # Commodities
+    "GC=F": 0.1,
+    "SI=F": 0.005,
+    "CL=F": 0.05,
+    
+    # Synthetic Indices
+    "VOL_10": 0.005,
+    "VOL_25": 0.005,
+    "VOL_50": 0.005,
+    "VOL_75": 0.005,
+    "VOL_100": 0.005,
+    "VOL_10_1S": 0.005,
+    "VOL_25_1S": 0.005,
+    "VOL_50_1S": 0.005,
+    "VOL_75_1S": 0.005,
+    "VOL_100_1S": 0.005,
+    "CRASH_300": 0.005,
+    "BOOM_300": 0.005,
+    "CRASH_500": 0.005,
+    "BOOM_500": 0.005,
+    "CRASH_1000": 0.005,
+    "BOOM_1000": 0.005
 }
 
 # ----------------- NEWS FILTER MODULE -----------------
