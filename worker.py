@@ -12,6 +12,9 @@ import numpy as np
 import yfinance as yf
 from dotenv import load_dotenv
 from supabase import create_client, Client, ClientOptions
+import asyncio
+import websockets
+import settings_manager
 
 # Load env using absolute path of current folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -672,7 +675,7 @@ def check_mtf_trend_ok(pair, sig_type):
     Otherwise returns False.
     """
     try:
-        df_15m = yf.download(pair, period="5d", interval="15m", progress=False, threads=False)
+        df_15m = download_market_data(pair, "15m", period="5d")
         if df_15m.empty or len(df_15m) < 200:
             return False
             
@@ -819,15 +822,117 @@ def get_scan_rejection_reason(closed_candle, pair, timeframe):
         
     return "NONE"
 
+DERIV_SYMBOL_MAP = {
+    "EURUSD=X": "frxEURUSD",
+    "GBPUSD=X": "frxGBPUSD",
+    "USDJPY=X": "frxUSDJPY",
+    "AUDUSD=X": "frxAUDUSD",
+    "USDCAD=X": "frxUSDCAD",
+    "USDCHF=X": "frxUSDCHF",
+    "EURGBP=X": "frxEURGBP",
+    "EURJPY=X": "frxEURJPY"
+}
+
+async def _fetch_deriv_candles_async(symbol, granularity_seconds, count):
+    url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+    async with websockets.connect(url, ping_interval=None) as ws:
+        request = {
+            "ticks_history": symbol,
+            "adjust_start_time": 1,
+            "count": count,
+            "end": "latest",
+            "style": "candles",
+            "granularity": granularity_seconds
+        }
+        await ws.send(json.dumps(request))
+        response = await ws.recv()
+        data = json.loads(response)
+        if "error" in data:
+            raise Exception(f"Deriv API error: {data['error'].get('message')}")
+        return data.get("candles", [])
+
+def download_deriv_candles(pair, timeframe, count=250):
+    try:
+        deriv_symbol = DERIV_SYMBOL_MAP.get(pair)
+        if not deriv_symbol:
+            print(f"[Deriv Data Loader]: Pair {pair} not mapped to Deriv symbols.")
+            return pd.DataFrame()
+            
+        granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else 60)
+        
+        # Run async function synchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            candles = loop.run_until_complete(_fetch_deriv_candles_async(deriv_symbol, granularity, count))
+        finally:
+            loop.close()
+            
+        if not candles:
+            return pd.DataFrame()
+            
+        records = []
+        for c in candles:
+            records.append({
+                "Time": pd.to_datetime(c["epoch"], unit="s", utc=True),
+                "Open": float(c["open"]),
+                "High": float(c["high"]),
+                "Low": float(c["low"]),
+                "Close": float(c["close"]),
+                "Volume": 0.0
+            })
+            
+        df = pd.DataFrame(records)
+        df.set_index("Time", inplace=True)
+        return df
+    except Exception as e:
+        print(f"[Deriv Data Loader Error] for {pair}: {e}")
+        return pd.DataFrame()
+
+def download_market_data(pair, timeframe, period="2d", count=250):
+    source = settings_manager.get_active_data_source()
+    if source == "Deriv WebSocket":
+        df = download_deriv_candles(pair, timeframe, count=count)
+        if not df.empty:
+            return df
+        print(f"[Data Loader]: Deriv fetch failed/empty for {pair}, falling back to yfinance.")
+        
+    try:
+        df = yf.download(pair, period=period, interval=timeframe, progress=False, threads=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df
+    except Exception as e:
+        print(f"[yfinance Fallback Error] for {pair}: {e}")
+        return pd.DataFrame()
+
+def download_market_batch(pairs, timeframe, period="5d", count=250):
+    source = settings_manager.get_active_data_source()
+    if source == "Deriv WebSocket":
+        dfs = {}
+        for pair in pairs:
+            df = download_deriv_candles(pair, timeframe, count=count)
+            if not df.empty:
+                dfs[pair] = df
+        if dfs:
+            df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
+            return df_batch
+        print("[Data Loader]: Deriv batch fetch failed/empty, falling back to yfinance.")
+        
+    try:
+        df_batch = yf.download(pairs, period=period, interval=timeframe, group_by="ticker", progress=False, threads=True)
+        return df_batch
+    except Exception as e:
+        print(f"[yfinance Batch Fallback Error]: {e}")
+        return pd.DataFrame()
+
 def process_market_signals(pair, timeframe):
     lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
     
     try:
-        df = yf.download(pair, period=lookback, interval=timeframe, progress=False, threads=False)
+        df = download_market_data(pair, timeframe, period=lookback)
         if df.empty:
             return
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
             
         df = calculate_indicators(df)
         df = check_signals(df, pair)
@@ -1249,11 +1354,9 @@ def resolve_pending_signals():
             # Download latest data to verify exit candle prices
             tf_lower = timeframe.lower()
             lookback = "2d" if tf_lower == "5m" else ("5d" if tf_lower == "15m" else "1d")
-            df = yf.download(pair, period=lookback, interval=tf_lower, progress=False, threads=False)
+            df = download_market_data(pair, tf_lower, period=lookback)
             if df.empty:
                 continue
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
                 
             for sig in sigs:
                 now_utc = datetime.datetime.now(pytz.utc)

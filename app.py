@@ -1,4 +1,7 @@
 import streamlit as st
+import asyncio
+import websockets
+import settings_manager
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -42,6 +45,110 @@ st.set_page_config(
     page_icon="📈",
     initial_sidebar_state="expanded"
 )
+
+DERIV_SYMBOL_MAP = {
+    "EURUSD=X": "frxEURUSD",
+    "GBPUSD=X": "frxGBPUSD",
+    "USDJPY=X": "frxUSDJPY",
+    "AUDUSD=X": "frxAUDUSD",
+    "USDCAD=X": "frxUSDCAD",
+    "USDCHF=X": "frxUSDCHF",
+    "EURGBP=X": "frxEURGBP",
+    "EURJPY=X": "frxEURJPY"
+}
+
+async def _fetch_deriv_candles_async(symbol, granularity_seconds, count):
+    url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+    async with websockets.connect(url, ping_interval=None) as ws:
+        request = {
+            "ticks_history": symbol,
+            "adjust_start_time": 1,
+            "count": count,
+            "end": "latest",
+            "style": "candles",
+            "granularity": granularity_seconds
+        }
+        await ws.send(json.dumps(request))
+        response = await ws.recv()
+        data = json.loads(response)
+        if "error" in data:
+            raise Exception(f"Deriv API error: {data['error'].get('message')}")
+        return data.get("candles", [])
+
+def download_deriv_candles(pair, timeframe, count=250):
+    try:
+        deriv_symbol = DERIV_SYMBOL_MAP.get(pair)
+        if not deriv_symbol:
+            print(f"[Deriv Data Loader]: Pair {pair} not mapped to Deriv symbols.")
+            return pd.DataFrame()
+            
+        granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else 60)
+        
+        # Run async function synchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            candles = loop.run_until_complete(_fetch_deriv_candles_async(deriv_symbol, granularity, count))
+        finally:
+            loop.close()
+            
+        if not candles:
+            return pd.DataFrame()
+            
+        records = []
+        for c in candles:
+            records.append({
+                "Time": pd.to_datetime(c["epoch"], unit="s", utc=True),
+                "Open": float(c["open"]),
+                "High": float(c["high"]),
+                "Low": float(c["low"]),
+                "Close": float(c["close"]),
+                "Volume": 0.0
+            })
+            
+        df = pd.DataFrame(records)
+        df.set_index("Time", inplace=True)
+        return df
+    except Exception as e:
+        print(f"[Deriv Data Loader Error] for {pair}: {e}")
+        return pd.DataFrame()
+
+def download_market_data(pair, timeframe, period="2d", count=250):
+    source = settings_manager.get_active_data_source()
+    if source == "Deriv WebSocket":
+        df = download_deriv_candles(pair, timeframe, count=count)
+        if not df.empty:
+            return df
+        print(f"[Data Loader]: Deriv fetch failed/empty for {pair}, falling back to yfinance.")
+        
+    try:
+        df = yf.download(pair, period=period, interval=timeframe, progress=False, threads=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df
+    except Exception as e:
+        print(f"[yfinance Fallback Error] for {pair}: {e}")
+        return pd.DataFrame()
+
+def download_market_batch(pairs, timeframe, period="5d", count=250):
+    source = settings_manager.get_active_data_source()
+    if source == "Deriv WebSocket":
+        dfs = {}
+        for pair in pairs:
+            df = download_deriv_candles(pair, timeframe, count=count)
+            if not df.empty:
+                dfs[pair] = df
+        if dfs:
+            df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
+            return df_batch
+        print("[Data Loader]: Deriv batch fetch failed/empty, falling back to yfinance.")
+        
+    try:
+        df_batch = yf.download(pairs, period=period, interval=timeframe, group_by="ticker", progress=False, threads=True)
+        return df_batch
+    except Exception as e:
+        print(f"[yfinance Batch Fallback Error]: {e}")
+        return pd.DataFrame()
 
 # Global settings dictionary to share state with background thread
 GLOBAL_SETTINGS = {
@@ -608,7 +715,7 @@ def local_resolve_pending_signals():
             if now_utc >= exit_time_utc:
                 pair = sig["pair"]
                 # Enforce lowercase timeframe in yfinance query
-                df = yf.download(pair, period="1d", interval="15m", progress=False)
+                df = download_market_data(pair, "15m", period="1d")
                 if df.empty:
                     continue
                     
@@ -862,7 +969,7 @@ def start_background_scanner():
                     lookback = "5d"
                     try:
                         # Fetch all tickers in parallel in a single HTTP request (extremely fast)
-                        df_batch = yf.download(RADAR_PAIRS, period=lookback, interval=timeframe, group_by="ticker", progress=False, threads=True)
+                        df_batch = download_market_batch(RADAR_PAIRS, timeframe, period=lookback)
                         if not df_batch.empty:
                             for pair in RADAR_PAIRS:
                                 if len(RADAR_PAIRS) > 1 and pair in df_batch.columns.get_level_values(0):
@@ -1025,11 +1132,11 @@ def start_background_scanner():
                     except Exception:
                         pass
                         
-                    yf_ok = False
+                    data_provider_ok = False
                     try:
-                        df_test = yf.download("EURUSD=X", period="1d", interval="15m", progress=False)
+                        df_test = download_market_data("EURUSD=X", "15m", period="1d")
                         if not df_test.empty:
-                            yf_ok = True
+                            data_provider_ok = True
                     except Exception:
                         pass
                         
@@ -1051,10 +1158,11 @@ def start_background_scanner():
                         except Exception as e_6h:
                             print(f"Error calculating 6h stats for heartbeat: {e_6h}")
                             
-                    if db_ok and tg_ok and yf_ok and thread_alive:
+                    active_provider = settings_manager.get_active_data_source()
+                    if db_ok and tg_ok and data_provider_ok and thread_alive:
                         status_msg = "🟢 <b>SYSTEM OK: Scanner Alive</b>\n\n" \
                                      "• Supabase DB: Connected\n" \
-                                     "• yfinance API: Online\n" \
+                                     f"• Data Provider ({active_provider}): Online\n" \
                                      "• Telegram Bot: Valid\n" \
                                      f"• Last 6H: {total_6h} Signals\n" \
                                      f"• WR: <b>{wr_6h:.1f}%</b>"
@@ -1063,7 +1171,7 @@ def start_background_scanner():
                         alert_msg = "🚨 <b>SYSTEM ALERT: Diagnostics Failure!</b>\n\n" \
                                     f"• Scanner Thread: {'🟢 Alive' if thread_alive else '🔴 DEAD'}\n" \
                                     f"• Supabase DB: {'🟢 Connected' if db_ok else '🔴 FAILED'}\n" \
-                                    f"• yfinance API: {'🟢 Online' if yf_ok else '🔴 OFFLINE'}\n" \
+                                    f"• Data Provider ({active_provider}): {'🟢 Online' if data_provider_ok else '🔴 OFFLINE'}\n" \
                                     f"• Telegram Bot: {'🟢 Valid' if tg_ok else '🔴 INVALID'}"
                         local_send_telegram_alert(alert_msg)
                         
@@ -1949,7 +2057,7 @@ def calculate_radar_data():
     radar_results = {}
     try:
         # Batch download 15m data for all tickers (5d is plenty for EMA 200)
-        df_batch = yf.download(RADAR_PAIRS, period="5d", interval="15m", group_by="ticker", progress=False)
+        df_batch = download_market_batch(RADAR_PAIRS, "15m", period="5d")
         if df_batch.empty:
             return radar_results
 
@@ -2005,20 +2113,15 @@ def run_backtest(pair, timeframe):
     st.info(f"Running backtest for {pair} on {timeframe} timeframe over the past {days} days...")
     
     try:
-        df = yf.download(pair, period=f"{days}d", interval=timeframe, progress=False)
+        df = download_market_data(pair, timeframe, period=f"{days}d", count=10000)
         if df.empty:
             st.error("Failed to load historical backtest data.")
             return
             
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-            
         df = calculate_indicators(df)
         df = check_signals(df, pair)
         
-        df_15m = yf.download(pair, period=f"{days}d", interval="15m", progress=False)
-        if isinstance(df_15m.columns, pd.MultiIndex):
-            df_15m.columns = df_15m.columns.get_level_values(0)
+        df_15m = download_market_data(pair, "15m", period=f"{days}d", count=5000)
         df_15m['EMA_50_15m'] = df_15m['Close'].ewm(span=50, adjust=False).mean()
         df_15m['EMA_200_15m'] = df_15m['Close'].ewm(span=200, adjust=False).mean()
         df_15m['Trend_15m'] = np.where(df_15m['EMA_50_15m'] > df_15m['EMA_200_15m'], "UP", "DOWN")
@@ -2205,9 +2308,7 @@ show_patterns = st.sidebar.checkbox("Show Candlestick Patterns", value=True)
 def get_live_data(pair, tf):
     lookback = "2d" if tf == "5m" else ("5d" if tf == "15m" else "1d")
     try:
-        df = yf.download(pair, period=lookback, interval=tf, progress=False, threads=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        df = download_market_data(pair, tf, period=lookback)
         return df
     except Exception:
         return pd.DataFrame()
@@ -2346,6 +2447,15 @@ if st.session_state.scanning:
     st.sidebar.success("🟢 SCANNER ACTIVE")
 else:
     st.sidebar.warning("🔴 SCANNER PAUSED")
+
+# Data Source Selection
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔌 DATA SOURCE FEED")
+current_source = settings_manager.get_active_data_source()
+source_options = ["Deriv WebSocket", "yfinance"]
+selected_index = source_options.index(current_source) if current_source in source_options else 0
+active_source = st.sidebar.selectbox("Active Provider", source_options, index=selected_index)
+settings_manager.set_active_data_source(active_source)
 
 # Global Settings
 st.sidebar.markdown("---")
@@ -2862,17 +2972,18 @@ with col_center:
             except Exception as tge:
                 tg_msg = str(tge)
                 
-        yf_ok = False
-        yf_msg = "Unknown Error"
+        provider_ok = False
+        provider_msg = "Unknown Error"
+        active_provider = settings_manager.get_active_data_source()
         try:
-            df_yf = yf.download("EURUSD=X", period="1d", interval="15m", progress=False)
-            if not df_yf.empty:
-                yf_ok = True
-                yf_msg = f"Online (Last Close: {float(df_yf['Close'].iloc[-1]):.5f})"
+            df_test = download_market_data("EURUSD=X", "15m", period="1d")
+            if not df_test.empty:
+                provider_ok = True
+                provider_msg = f"Online (Last Close: {float(df_test['Close'].iloc[-1]):.5f})"
             else:
-                yf_msg = "Empty DataFrame"
-        except Exception as yfe:
-            yf_msg = str(yfe)
+                provider_msg = "Empty DataFrame"
+        except Exception as pe:
+            provider_msg = str(pe)
             
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -2882,7 +2993,7 @@ with col_center:
         with c2:
             st.metric("Telegram Connection", "🟢 Valid" if tg_ok else "🔴 Invalid", f"Bot: {bot_name}", help=tg_msg)
         with c3:
-            st.metric("yfinance API Connection", "🟢 Online" if yf_ok else "🔴 Offline", help=yf_msg)
+            st.metric("Data Provider Status", "🟢 Online" if provider_ok else "🔴 Offline", f"Active: {active_provider}", help=provider_msg)
             
         # 2. Scanner Thread Status
         st.markdown("### ⚙️ SCANNER THREAD STATUS")
