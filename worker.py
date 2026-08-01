@@ -110,6 +110,9 @@ TIMEFRAMES = ["15m"]
 
 # Debug Mode tracking variables
 LAST_DEBUG_REPORT_TIME = None
+LAST_HOURLY_SENT_HOUR = None
+LAST_DAILY_SENT_DATE = None
+LAST_DIAGNOSTICS_SENT_TIME = None
 LAST_SCAN_SCORES = {}
 
 def get_supabase_client():
@@ -1349,6 +1352,75 @@ def process_market_signals_prefetched(pair, timeframe, df):
         print(f"Error prefetched processing for {pair} [{timeframe}]: {e}")
         return False
 
+def send_diagnostics_heartbeat():
+    if supabase_client is None:
+        return
+    try:
+        import requests
+        import datetime
+        import pytz
+        
+        # 1. DB status
+        db_ok = False
+        try:
+            supabase_client.table("signals").select("*").limit(1).execute()
+            db_ok = True
+        except:
+            pass
+            
+        # 2. TG status
+        tg_ok = False
+        try:
+            url_tg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
+            res_tg = requests.get(url_tg, timeout=5)
+            if res_tg.status_code == 200:
+                tg_ok = True
+        except:
+            pass
+            
+        # 3. Data Provider status
+        data_provider_ok = False
+        try:
+            df_test = download_market_data("EURUSD=X", "15m", period="1d")
+            if not df_test.empty:
+                data_provider_ok = True
+        except:
+            pass
+            
+        # 4. Winrate and count for last 6 hours
+        total_6h = 0
+        wr_6h = 0.0
+        try:
+            tz_ry = pytz.timezone("Asia/Riyadh")
+            now_ry = datetime.datetime.now(tz_ry)
+            six_hours_ago = now_ry - datetime.timedelta(hours=6)
+            six_hours_ago_utc = six_hours_ago.astimezone(pytz.utc).isoformat()
+            res_6h = supabase_client.table("signals").select("*").gte("time", six_hours_ago_utc).execute()
+            if res_6h.data:
+                sigs_6h = res_6h.data
+                total_6h = len(sigs_6h)
+                resolved_6h = [s for s in sigs_6h if s["status"] in ["WIN", "LOSS"]]
+                wins_6h = sum(1 for s in resolved_6h if s["status"] == "WIN")
+                wr_6h = (wins_6h / len(resolved_6h) * 100) if resolved_6h else 0.0
+        except Exception as e_6h:
+            print(f"Error calculating 6h stats: {e_6h}")
+            
+        active_provider = settings_manager.get_active_data_source()
+        active_host = settings_manager.get_active_host()
+        
+        status_msg = "🟢 <b>SYSTEM OK: Scanner Alive</b>\n\n" \
+                     f"• Supabase DB: {'Connected' if db_ok else 'FAILED'}\n" \
+                     f"• Data Provider: {active_provider} ({'Online' if data_provider_ok else 'OFFLINE'})\n" \
+                     f"• Designated Server: {active_host}\n" \
+                     f"• Telegram Bot: {'Valid' if tg_ok else 'INVALID'}\n" \
+                     f"• Last 6H: {total_6h} Signals\n" \
+                     f"• WR: <b>{wr_6h:.1f}%</b>"
+                     
+        send_telegram_alert(status_msg)
+        print("[DIAGNOSTICS] 6H Heartbeat successfully sent.")
+    except Exception as e:
+        print(f"Error sending diagnostics heartbeat: {e}")
+
 def send_hourly_summary():
     if supabase_client is None:
         return
@@ -1577,6 +1649,28 @@ if __name__ == "__main__":
                                 f"Last scan time: {time_ast_str}\n" \
                                 f"Signals found with 3/5 score: {three_score_count}"
                     send_telegram_alert(debug_msg)
+            
+            # Check current time in Saudi Arabia (Jeddah/Riyadh AST)
+            import pytz
+            ast_tz = pytz.timezone("Asia/Riyadh")
+            now_ast = datetime.datetime.now(ast_tz)
+            
+            # 1. Hourly Summary Trigger (at the start of every hour)
+            hour_key = now_ast.strftime("%Y-%m-%d-%H")
+            if now_ast.minute == 0 and LAST_HOURLY_SENT_HOUR != hour_key:
+                send_hourly_summary()
+                LAST_HOURLY_SENT_HOUR = hour_key
+                
+            # 2. Daily Summary Trigger (at 9:00 PM Saudi Arabia Time)
+            date_key = now_ast.strftime("%Y-%m-%d")
+            if now_ast.hour == 21 and now_ast.minute == 0 and LAST_DAILY_SENT_DATE != date_key:
+                send_daily_summary()
+                LAST_DAILY_SENT_DATE = date_key
+
+            # 3. 6-Hour Diagnostics Heartbeat Trigger
+            if LAST_DIAGNOSTICS_SENT_TIME is None or (now_ast - LAST_DIAGNOSTICS_SENT_TIME).total_seconds() >= 21600:
+                send_diagnostics_heartbeat()
+                LAST_DIAGNOSTICS_SENT_TIME = now_ast
             
             # Target 30 second refresh loop
             elapsed = time.time() - loop_start
