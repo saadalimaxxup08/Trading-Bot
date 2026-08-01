@@ -23,10 +23,12 @@ load_dotenv(dotenv_path=env_path)
 def get_secret(key, default=None):
     val = os.environ.get(key)
     if val:
-        return val
+        return val.strip().strip('"').strip("'")
     try:
         if hasattr(st, "secrets") and key in st.secrets:
-            return st.secrets[key]
+            val_st = st.secrets[key]
+            if val_st:
+                return str(val_st).strip().strip('"').strip("'")
     except Exception:
         pass
     return default

@@ -17,6 +17,12 @@ def get_supabase_client():
                 key = st.secrets.get("SUPABASE_KEY")
             except:
                 pass
+        
+        if url:
+            url = str(url).strip().strip('"').strip("'")
+        if key:
+            key = str(key).strip().strip('"').strip("'")
+            
         if url and key:
             options = ClientOptions(postgrest_client_timeout=10)
             return create_client(url, key, options=options)

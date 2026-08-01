@@ -21,10 +21,15 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(current_dir, ".env")
 load_dotenv(dotenv_path=env_path)
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+def clean_env_var(val):
+    if val:
+        return val.strip().strip('"').strip("'")
+    return val
+
+SUPABASE_URL = clean_env_var(os.environ.get("SUPABASE_URL"))
+SUPABASE_KEY = clean_env_var(os.environ.get("SUPABASE_KEY"))
+TELEGRAM_BOT_TOKEN = clean_env_var(os.environ.get("TELEGRAM_BOT_TOKEN"))
+TELEGRAM_CHAT_ID = clean_env_var(os.environ.get("TELEGRAM_CHAT_ID"))
 
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [

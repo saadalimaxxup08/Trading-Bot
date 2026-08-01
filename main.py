@@ -11,6 +11,12 @@ class HealthHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 token = os.environ.get("TELEGRAM_BOT_TOKEN")
                 chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+                
+                if token:
+                    token = token.strip().strip('"').strip("'")
+                if chat_id:
+                    chat_id = chat_id.strip().strip('"').strip("'")
+                    
                 if token and chat_id:
                     url = f"https://api.telegram.org/bot{token}/sendMessage"
                     payload = {
