@@ -89,3 +89,37 @@ def set_active_data_source(source):
             print(f"[Settings] Successfully saved active_data_source='{source}' to local JSON.")
         except Exception as e:
             print(f"[Settings Manager Local Write Error]: {e}")
+
+def get_active_host():
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            res = client.table("signals").select("status").eq("id", "setting_active_host").execute()
+            if res.data:
+                return res.data[0]["status"]
+        except Exception as e:
+            print(f"[Settings Supabase Read Host Error]: {e}")
+    return "Render"
+
+def set_active_host(host):
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            payload = {
+                "id": "setting_active_host",
+                "time": "1970-01-01T00:00:00+00:00",
+                "pair": "SETTINGS",
+                "timeframe": "CONFIG",
+                "type": "active_host",
+                "entry_price": 0.0,
+                "exit_time": "1970-01-01T00:00:00+00:00",
+                "exit_price": 0.0,
+                "status": host,
+                "strength": "N/A",
+                "confirmations": 0,
+                "patterns": "N/A"
+            }
+            client.table("signals").upsert(payload).execute()
+            print(f"[Settings] Successfully saved active_host='{host}' to Supabase.")
+        except Exception as e:
+            print(f"[Settings Supabase Write Host Error]: {e}")

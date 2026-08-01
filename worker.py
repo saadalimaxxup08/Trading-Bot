@@ -1540,6 +1540,15 @@ if __name__ == "__main__":
     
     while True:
         try:
+            # Check Active Host Setting to prevent duplicate alerts
+            active_host = settings_manager.get_active_host()
+            local_host = "Render" if os.environ.get("RENDER") == "true" else "AWS"
+            
+            if active_host != local_host:
+                print(f"[HOST CONTROL] Standby mode. Active host is set to '{active_host}', but local is '{local_host}'. Skipping scan.")
+                time.sleep(15)
+                continue
+                
             loop_start = time.time()
             
             # Scan each pair across each timeframe

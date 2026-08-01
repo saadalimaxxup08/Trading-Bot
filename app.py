@@ -2565,6 +2565,20 @@ selected_index = source_options.index(current_source) if current_source in sourc
 active_source = st.sidebar.selectbox("Active Provider", source_options, index=selected_index)
 settings_manager.set_active_data_source(active_source)
 
+# Host Controller Selection
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🖥️ ACTIVE HOST CONTROL")
+current_host = settings_manager.get_active_host()
+host_options = ["Render", "AWS"]
+selected_host_index = host_options.index(current_host) if current_host in host_options else 0
+active_host = st.sidebar.selectbox("Designated Server", host_options, index=selected_host_index)
+settings_manager.set_active_host(active_host)
+
+if active_host == "Render":
+    st.sidebar.info("ℹ️ **Render Server** is active. AWS server is in standby.")
+else:
+    st.sidebar.info("ℹ️ **AWS Server** is active. Render server is in standby.")
+
 # Global Settings
 st.sidebar.markdown("---")
 st.sidebar.info("🚀 **DUAL MODE 24/7 ACTIVE**\nBot scans and labels both 🟢 IN-SESSION & 🟡 OFF-SESSION signals.")
