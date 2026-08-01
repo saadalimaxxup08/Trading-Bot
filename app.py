@@ -3207,7 +3207,7 @@ with col_center:
                 
         # 4. Alert Test Buttons
         st.markdown("### 🔔 ALERT TEST BUTTONS")
-        a1, a2, a3 = st.columns(3)
+        a1, a2, a3, a4 = st.columns(4)
         with a1:
             if st.button("Send Test Pre-Alert", use_container_width=True):
                 pre_msg = f"🚨 <b>PRE-ALERT LOADING... (TEST)</b>\n\n" \
@@ -3235,6 +3235,63 @@ with col_center:
             if st.button("Send Test Hourly Report", use_container_width=True):
                 local_send_hourly_summary()
                 st.success("Hourly Report sent!")
+        with a4:
+            if st.button("Send Test Diagnostics", use_container_width=True):
+                import requests
+                db_ok = False
+                try:
+                    supabase_client.table("signals").select("*").limit(1).execute()
+                    db_ok = True
+                except Exception:
+                    pass
+                    
+                tg_ok = False
+                try:
+                    tg_token = get_secret("TELEGRAM_BOT_TOKEN")
+                    url_tg = f"https://api.telegram.org/bot{tg_token}/getMe"
+                    res_tg = requests.get(url_tg, timeout=5)
+                    if res_tg.status_code == 200:
+                        tg_ok = True
+                except Exception:
+                    pass
+                    
+                data_provider_ok = False
+                try:
+                    df_test = download_market_data("EURUSD=X", "15m", period="1d")
+                    if not df_test.empty:
+                        data_provider_ok = True
+                except Exception:
+                    pass
+
+                total_6h = 0
+                wr_6h = 0.0
+                try:
+                    tz_ry = pytz.timezone("Asia/Riyadh")
+                    now_ry = datetime.datetime.now(tz_ry)
+                    six_hours_ago = now_ry - datetime.timedelta(hours=6)
+                    six_hours_ago_utc = six_hours_ago.astimezone(pytz.utc).isoformat()
+                    res_6h = supabase_client.table("signals").select("*").gte("time", six_hours_ago_utc).execute()
+                    if res_6h.data:
+                        sigs_6h = res_6h.data
+                        total_6h = len(sigs_6h)
+                        resolved_6h = [s for s in sigs_6h if s["status"] in ["WIN", "LOSS"]]
+                        wins_6h = sum(1 for s in resolved_6h if s["status"] == "WIN")
+                        wr_6h = (wins_6h / len(resolved_6h) * 100) if resolved_6h else 0.0
+                except Exception as e_6h:
+                    print(f"Error calculating 6h stats: {e_6h}")
+                    
+                active_provider = settings_manager.get_active_data_source()
+                active_host = settings_manager.get_active_host()
+                
+                status_msg = "🟢 <b>SYSTEM OK: Scanner Alive (TEST)</b>\n\n" \
+                             f"• Supabase DB: {'Connected' if db_ok else 'FAILED'}\n" \
+                             f"• Data Provider: {active_provider} ({'Online' if data_provider_ok else 'OFFLINE'})\n" \
+                             f"• Designated Server: {active_host}\n" \
+                             f"• Telegram Bot: {'Valid' if tg_ok else 'INVALID'}\n" \
+                             f"• Last 6H: {total_6h} Signals\n" \
+                             f"• WR: <b>{wr_6h:.1f}%</b>"
+                local_send_telegram_alert(status_msg)
+                st.success("Diagnostics heartbeat test sent!")
                 
         # 5. Dashboard Health (DB Count & Last 5 Signals Table)
         st.markdown("### 📋 TODAY'S SIGNALS & HEALTH")
