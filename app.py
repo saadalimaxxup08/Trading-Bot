@@ -20,6 +20,17 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 env_path = os.path.join(current_dir, ".env")
 load_dotenv(dotenv_path=env_path)
 
+def get_secret(key, default=None):
+    val = os.environ.get(key)
+    if val:
+        return val
+    try:
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return default
+
 from supabase import create_client, Client, ClientOptions
 
 def trigger_confetti():
@@ -490,9 +501,9 @@ if "news_last_fetched" not in st.session_state:
     st.session_state.news_last_fetched = 0
 
 # ----------------- SUPABASE AUTH & DB CLIENT -----------------
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://your-project-id.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "your-supabase-anon-key-here")
-APP_URL = os.environ.get("APP_URL", "http://localhost:8501/")
+SUPABASE_URL = get_secret("SUPABASE_URL", "https://your-project-id.supabase.co")
+SUPABASE_KEY = get_secret("SUPABASE_KEY", "your-supabase-anon-key-here")
+APP_URL = get_secret("APP_URL", "http://localhost:8501/")
 
 # Global dictionary to store PKCE verifiers across session reloads
 if not hasattr(st, "_pending_verifiers"):
@@ -520,8 +531,8 @@ if not hasattr(st, "_processed_signals"):
     st._processed_signals = set()
 
 def local_send_telegram_alert(text):
-    tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    tg_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    tg_token = get_secret("TELEGRAM_BOT_TOKEN")
+    tg_chat_id = get_secret("TELEGRAM_CHAT_ID")
     if not tg_token or not tg_chat_id:
         print("[Telegram Alert Warning] Missing Token or Chat ID in environment.")
         return False
@@ -1166,7 +1177,7 @@ def start_background_scanner():
                         
                     tg_ok = False
                     try:
-                        tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+                        tg_token = get_secret("TELEGRAM_BOT_TOKEN")
                         url_tg = f"https://api.telegram.org/bot{tg_token}/getMe"
                         res_tg = requests.get(url_tg, timeout=5)
                         if res_tg.status_code == 200:
