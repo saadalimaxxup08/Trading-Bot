@@ -44,7 +44,7 @@ RADAR_PAIRS = [
     # Synthetic Indices (Deriv Only)
     "VOL_10", "VOL_25", "VOL_50", "VOL_75", "VOL_100",
     "VOL_10_1S", "VOL_25_1S", "VOL_50_1S", "VOL_75_1S", "VOL_100_1S",
-    "CRASH_300", "BOOM_300", "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
+    "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
 ]
 
 # Tier-Based Pair Matrix
