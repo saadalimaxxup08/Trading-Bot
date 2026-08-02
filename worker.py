@@ -1683,15 +1683,15 @@ if __name__ == "__main__":
             debug_mode = os.environ.get("DEBUG_MODE", "FALSE").upper() == "TRUE"
             if debug_mode:
                 now_time = datetime.datetime.now()
-                if LAST_DEBUG_REPORT_TIME is None or (now_time - LAST_DEBUG_REPORT_TIME).total_seconds() >= 900:
+                if LAST_DEBUG_REPORT_TIME is None or (now_time - LAST_DEBUG_REPORT_TIME).total_seconds() >= 21600:
                     LAST_DEBUG_REPORT_TIME = now_time
-                    three_score_count = sum(1 for p, score in LAST_SCAN_SCORES.items() if score == 3)
+                    five_score_count = sum(1 for p, score in LAST_SCAN_SCORES.items() if score == 5)
                     ast_tz = pytz.timezone("Asia/Riyadh")
                     ast_now = now_time.astimezone(ast_tz) if now_time.tzinfo else pytz.utc.localize(now_time).astimezone(ast_tz)
                     time_ast_str = ast_now.strftime("%I:%M %p AST")
                     debug_msg = f"ℹ️ <b>Bot Alive - Scanning {len(RADAR_PAIRS)} pairs.</b>\n" \
                                 f"Last scan time: {time_ast_str}\n" \
-                                f"Signals found with 3/5 score: {three_score_count}"
+                                f"Signals found with 5/5 score: {five_score_count}"
                     send_telegram_alert(debug_msg)
             
             # Check current time in Saudi Arabia (Jeddah/Riyadh AST)
