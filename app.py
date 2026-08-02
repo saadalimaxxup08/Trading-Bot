@@ -1171,11 +1171,18 @@ def start_background_scanner():
                 if (now_utc - SystemHealth.LAST_SELF_TEST_TIME).total_seconds() >= 21600:
                     import requests
                     db_ok = False
+                    db_error_msg = "Unknown Error"
                     try:
-                        supabase_client.table("signals").select("*").limit(1).execute()
-                        db_ok = True
-                    except Exception:
-                        pass
+                        global supabase_client
+                        if supabase_client is None:
+                            supabase_client = get_supabase_client()
+                        if supabase_client is not None:
+                            supabase_client.table("signals").select("*").limit(1).execute()
+                            db_ok = True
+                        else:
+                            db_error_msg = "Supabase client is None"
+                    except Exception as e:
+                        db_error_msg = str(e)
                         
                     tg_ok = False
                     try:
@@ -1227,7 +1234,7 @@ def start_background_scanner():
                     else:
                         alert_msg = "🚨 <b>SYSTEM ALERT: Diagnostics Failure!</b>\n\n" \
                                     f"• Scanner Thread: {'🟢 Alive' if thread_alive else '🔴 DEAD'}\n" \
-                                    f"• Supabase DB: {'🟢 Connected' if db_ok else '🔴 FAILED'}\n" \
+                                    f"• Supabase DB: 🔴 FAILED ({db_error_msg})\n" \
                                     f"• Data Provider: {active_provider} ({'🟢 Online' if data_provider_ok else '🔴 OFFLINE'})\n" \
                                     f"• Designated Server: {active_host}\n" \
                                     f"• Telegram Bot: {'🟢 Valid' if tg_ok else '🔴 INVALID'}"
