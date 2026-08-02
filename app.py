@@ -1668,7 +1668,7 @@ RADAR_PAIRS = [
     # Cryptocurrencies
     "BTC-USD", "ETH-USD", "LTC-USD",
     # Commodities
-    "GC=F", "SI=F", "CL=F",
+    "GC=F", "SI=F",
     # Synthetic Indices (Deriv Only)
     "VOL_10", "VOL_25", "VOL_50", "VOL_75", "VOL_100",
     "VOL_10_1S", "VOL_25_1S", "VOL_50_1S", "VOL_75_1S", "VOL_100_1S",
