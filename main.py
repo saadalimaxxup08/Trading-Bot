@@ -86,7 +86,7 @@ def main():
     try:
         # bufsize=1 enables line-buffering so logs are written immediately
         log_file = open("worker_log.txt", "w", encoding="utf-8", buffering=1)
-        subprocess.Popen([sys.executable, "worker.py"], stdout=log_file, stderr=log_file)
+        subprocess.Popen([sys.executable, "-u", "worker.py"], stdout=log_file, stderr=log_file)
         print("[BOT] worker.py successfully spawned in background. Output redirected to worker_log.txt.")
     except Exception as e:
         print(f"[BOT Launch Error]: Failed to start worker.py: {e}")
