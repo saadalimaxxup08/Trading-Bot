@@ -47,6 +47,25 @@ RADAR_PAIRS = [
     "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
 ]
 
+def is_market_open(pair):
+    # If not a forex pair or commodity (does not end with =X or =F), it is always open (24/7 cryptos and synthetics)
+    if not (pair.endswith("=X") or pair.endswith("=F")):
+        return True
+        
+    # Check if currently weekend (Friday 21:00 UTC to Sunday 22:00 UTC)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    day = now_utc.weekday() # 0 = Monday, ..., 4 = Friday, 5 = Saturday, 6 = Sunday
+    hour = now_utc.hour
+    
+    if day == 4 and hour >= 21: # Friday night
+        return False
+    if day == 5: # Saturday
+        return False
+    if day == 6 and hour < 22: # Sunday day
+        return False
+        
+    return True
+
 # Tier-Based Pair Matrix
 TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
 TIER_2_PAIRS = [p for p in RADAR_PAIRS if p not in TIER_1_PAIRS]
@@ -1624,6 +1643,8 @@ if __name__ == "__main__":
             # Scan each pair across each timeframe
             for timeframe in TIMEFRAMES:
                 for pair in RADAR_PAIRS:
+                    if not is_market_open(pair):
+                        continue
                     process_market_signals(pair, timeframe)
                     # Speed up scan for Deriv WebSocket (no rate limit issues), throttle yfinance
                     active_source = settings_manager.get_active_data_source()

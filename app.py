@@ -1021,11 +1021,11 @@ def start_background_scanner():
                 for timeframe in ["5m", "15m"]:
                     lookback = "2d" if timeframe == "5m" else "5d"
                     try:
-                        # Fetch all tickers in parallel in a single HTTP request (extremely fast)
-                        df_batch = download_market_batch(RADAR_PAIRS, timeframe, period=lookback)
+                        open_pairs = [p for p in RADAR_PAIRS if is_market_open(p)]
+                        df_batch = download_market_batch(open_pairs, timeframe, period=lookback)
                         if not df_batch.empty:
-                            for pair in RADAR_PAIRS:
-                                if len(RADAR_PAIRS) > 1 and pair in df_batch.columns.get_level_values(0):
+                            for pair in open_pairs:
+                                if len(open_pairs) > 1 and pair in df_batch.columns.get_level_values(0):
                                     df_pair = df_batch[pair].dropna(subset=['Close'])
                                 else:
                                     df_pair = df_batch.dropna(subset=['Close'])
@@ -1674,6 +1674,25 @@ RADAR_PAIRS = [
     "VOL_10_1S", "VOL_25_1S", "VOL_50_1S", "VOL_75_1S", "VOL_100_1S",
     "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
 ]
+
+def is_market_open(pair):
+    # If not a forex pair or commodity (does not end with =X or =F), it is always open (24/7 cryptos and synthetics)
+    if not (pair.endswith("=X") or pair.endswith("=F")):
+        return True
+        
+    # Check if currently weekend (Friday 21:00 UTC to Sunday 22:00 UTC)
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    day = now_utc.weekday() # 0 = Monday, ..., 4 = Friday, 5 = Saturday, 6 = Sunday
+    hour = now_utc.hour
+    
+    if day == 4 and hour >= 21: # Friday night
+        return False
+    if day == 5: # Saturday
+        return False
+    if day == 6 and hour < 22: # Sunday day
+        return False
+        
+    return True
 
 # Tier-Based Pair Matrix
 TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
