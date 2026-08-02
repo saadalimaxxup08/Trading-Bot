@@ -1066,6 +1066,7 @@ def start_background_scanner():
                                                         pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
                                                         pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
                                                                   f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                                                                  f"<b>Timeframe:</b> {timeframe.upper()}\n" \
                                                                   f"<b>Direction:</b> {pre_dir}\n" \
                                                                   f"<b>Session:</b> {pre_session_label}\n" \
                                                                   f"<b>Time:</b> {pre_time_str}\n" \
@@ -1077,7 +1078,7 @@ def start_background_scanner():
                                         print(f"Pre-alert calculation error: {pre_e}")
                                         
                                 # Determine expected closed candle time to evaluate cancel outcome
-                                delta_t = datetime.timedelta(minutes=15)
+                                delta_t = datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)
                                 last_candle_time = df_pair.index[-1]
                                 last_candle_end = last_candle_time + delta_t
                                 if now_utc >= last_candle_end:
@@ -1102,6 +1103,7 @@ def start_background_scanner():
                                         cancel_time_str = f"{now_ast.strftime('%I:%M:%S %p AST')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
                                         cancel_msg = f"❌ <b>SIGNAL CANCELLED</b>\n\n" \
                                                      f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                                                     f"<b>Timeframe:</b> {timeframe.upper()}\n" \
                                                      f"<b>Direction:</b> {pre_dir}\n" \
                                                      f"<b>Session:</b> {pre_session_label}\n" \
                                                      f"<b>Time:</b> {cancel_time_str}\n" \
