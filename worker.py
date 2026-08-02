@@ -66,6 +66,24 @@ def is_market_open(pair):
         
     return True
 
+def get_pip_multiplier(pair):
+    pair_str = str(pair).upper()
+    if "BTC" in pair_str:
+        return 1.0
+    if "ETH" in pair_str:
+        return 0.1
+    if "LTC" in pair_str:
+        return 0.01
+    if "GC=F" in pair_str:
+        return 0.1
+    if "SI=F" in pair_str:
+        return 0.01
+    if "VOL_" in pair_str or "CRASH_" in pair_str or "BOOM_" in pair_str:
+        return 1.0
+    if "JPY" in pair_str:
+        return 0.01
+    return 0.0001
+
 # Tier-Based Pair Matrix
 TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
 TIER_2_PAIRS = [p for p in RADAR_PAIRS if p not in TIER_1_PAIRS]
@@ -472,11 +490,21 @@ def check_signals(df, pair=None):
     macd_up_cross = (macd_prev <= signal_prev) & (macd > signal)
     macd_down_cross = (macd_prev >= signal_prev) & (macd < signal)
     
-    bb_lower_touch = (df['Low'].shift(1) <= df['BB_Lower'].shift(1)) | (df['Low'] <= df['BB_Lower'])
+    bb_lower_touch = (
+        (df['Low'] <= df['BB_Lower']) |
+        (df['Low'].shift(1) <= df['BB_Lower'].shift(1)) |
+        (df['Low'].shift(2) <= df['BB_Lower'].shift(2)) |
+        (df['Low'].shift(3) <= df['BB_Lower'].shift(3))
+    )
     bb_lower_recover = df['Close'] > df['Open']
     bb_call_trigger = bb_lower_touch & bb_lower_recover
     
-    bb_upper_touch = (df['High'].shift(1) >= df['BB_Upper'].shift(1)) | (df['High'] >= df['BB_Upper'])
+    bb_upper_touch = (
+        (df['High'] >= df['BB_Upper']) |
+        (df['High'].shift(1) >= df['BB_Upper'].shift(1)) |
+        (df['High'].shift(2) >= df['BB_Upper'].shift(2)) |
+        (df['High'].shift(3) >= df['BB_Upper'].shift(3))
+    )
     bb_upper_recover = df['Close'] < df['Open']
     bb_put_trigger = bb_upper_touch & bb_upper_recover
     
@@ -492,7 +520,10 @@ def check_signals(df, pair=None):
     # 4. Volume Confirmations
     vol = df['Volume']
     vol_prev = vol.shift(1)
-    vol_increasing = vol > vol_prev
+    if (vol == 0).all():
+        vol_increasing = pd.Series(True, index=df.index)
+    else:
+        vol_increasing = vol > vol_prev
     
     # 5. RSI Room to grow
     rsi_room_call = rsi < 45
@@ -507,10 +538,7 @@ def check_signals(df, pair=None):
         p_score = 0
         
         # Pips multiplier for Pivot filter
-        is_jpy = False
-        if pair and "JPY" in str(pair):
-            is_jpy = True
-        pips_mult = 0.01 if is_jpy else 0.0001
+        pips_mult = get_pip_multiplier(pair)
         ten_pips = 10 * pips_mult
         
         # V4 Sniper Filters inputs
@@ -795,8 +823,7 @@ def check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
     if closed_candle.get('ATR_Spike', False):
         return False
         
-    # 4. Pivot Level Confirmation
-    pips_mult = 0.01 if "JPY" in pair else 0.0001
+    pips_mult = get_pip_multiplier(pair)
     ten_pips = 10 * pips_mult
     if sig_type == "CALL":
         swing_low = closed_candle.get('Swing_Low_20', 0.0)
@@ -864,9 +891,7 @@ def get_scan_rejection_reason(closed_candle, pair, timeframe):
     if closed_candle.get('ATR_Spike', False):
         return "ATR_SPIKE_LIMIT_EXCEEDED"
         
-    # Enforce Pivot S/R boundaries
-    is_jpy = "JPY" in str(pair)
-    pips_mult = 0.01 if is_jpy else 0.0001
+    pips_mult = get_pip_multiplier(pair)
     ten_pips = 10 * pips_mult
     bb_lower = float(closed_candle.get('BB_Lower', 0.0))
     bb_upper = float(closed_candle.get('BB_Upper', 0.0))

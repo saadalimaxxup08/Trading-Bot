@@ -650,9 +650,7 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
         rsi_room_ok = (rsi_val < 45) if sig_type == "CALL" else (rsi_val > 55)
         ema_trend_ok = (close_price > ema50_val or ema50_val > ema200_val) if sig_type == "CALL" else (close_price < ema50_val or ema50_val < ema200_val)
         
-        # Pips multiplier for swing pivot check
-        is_jpy = "JPY" in str(pair)
-        pips_mult = 0.01 if is_jpy else 0.0001
+        pips_mult = get_pip_multiplier(pair)
         ten_pips = 10 * pips_mult
         swing_low_val = float(live_row.get('Swing_Low_20', 0))
         swing_high_val = float(live_row.get('Swing_High_20', 0))
@@ -1694,6 +1692,24 @@ def is_market_open(pair):
         
     return True
 
+def get_pip_multiplier(pair):
+    pair_str = str(pair).upper()
+    if "BTC" in pair_str:
+        return 1.0
+    if "ETH" in pair_str:
+        return 0.1
+    if "LTC" in pair_str:
+        return 0.01
+    if "GC=F" in pair_str:
+        return 0.1
+    if "SI=F" in pair_str:
+        return 0.01
+    if "VOL_" in pair_str or "CRASH_" in pair_str or "BOOM_" in pair_str:
+        return 1.0
+    if "JPY" in pair_str:
+        return 0.01
+    return 0.0001
+
 # Tier-Based Pair Matrix
 TIER_1_PAIRS = ["EURUSD=X", "GBPUSD=X", "EURJPY=X"]
 TIER_2_PAIRS = [p for p in RADAR_PAIRS if p not in TIER_1_PAIRS]
@@ -1994,13 +2010,23 @@ def check_signals(df, pair=None):
     macd_up_cross = (macd_prev <= signal_prev) & (macd > signal)
     macd_down_cross = (macd_prev >= signal_prev) & (macd < signal)
     
-    bb_lower_touch = (df['Low'].shift(1) <= df['BB_Lower'].shift(1)) | (df['Low'] <= df['BB_Lower'])
+    bb_lower_touch = (
+        (df['Low'] <= df['BB_Lower']) |
+        (df['Low'].shift(1) <= df['BB_Lower'].shift(1)) |
+        (df['Low'].shift(2) <= df['BB_Lower'].shift(2)) |
+        (df['Low'].shift(3) <= df['BB_Lower'].shift(3))
+    )
     bb_lower_recover = df['Close'] > df['Open']
     bb_call_trigger = bb_lower_touch & bb_lower_recover
     
-    bb_upper_touch = (df['High'].shift(1) >= df['BB_Upper'].shift(1)) | (df['High'] >= df['BB_Upper'])
+    bb_upper_touch = (
+        (df['High'] >= df['BB_Upper']) |
+        (df['High'].shift(1) >= df['BB_Upper'].shift(1)) |
+        (df['High'].shift(2) >= df['BB_Upper'].shift(2)) |
+        (df['High'].shift(3) >= df['BB_Upper'].shift(3))
+    )
     bb_upper_recover = df['Close'] < df['Open']
-    bb_put_trigger = bb_upper_touch & bb_upper_recover
+    bb_put_trigger = bb_upper_touch & bb_put_recover if 'bb_put_recover' in locals() else bb_upper_touch & bb_upper_recover
     
     # 2. Safety Filters (RSI Overbought/Oversold boundaries)
     rsi = df['RSI_14']
@@ -2032,10 +2058,7 @@ def check_signals(df, pair=None):
         p_score = 0
         
         # Pips multiplier for Pivot filter
-        is_jpy = False
-        if pair and "JPY" in str(pair):
-            is_jpy = True
-        pips_mult = 0.01 if is_jpy else 0.0001
+        pips_mult = get_pip_multiplier(pair)
         ten_pips = 10 * pips_mult
         
         # V4 Sniper Filters inputs
