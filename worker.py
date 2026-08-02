@@ -794,10 +794,8 @@ def get_scan_rejection_reason(closed_candle, pair, timeframe):
     """
     Evaluates closed_candle step-by-step to identify the exact technical reason why a potential trade was rejected.
     """
-    # Check session constraints first
-    time_val = closed_candle.name
-    if get_session_type(time_val) != "IN-SESSION":
-        return "OFF_SESSION"
+    # Replaced session constraints check to allow off-session signals
+    pass
 
     call_score = int(closed_candle.get('Call_Score', 0))
     put_score = int(closed_candle.get('Put_Score', 0))
@@ -1067,7 +1065,7 @@ def process_market_signals(pair, timeframe):
         ast_time_str = ast_now.strftime("%H:%M AST")
         
         session_type = get_session_type(closed_candle_time)
-        session_label = "IN-SESSION" if session_type == "IN-SESSION" else "OFF-SESSION"
+        session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
         
         call_score = int(closed_candle.get('Call_Score', 0))
         put_score = int(closed_candle.get('Put_Score', 0))
@@ -1133,10 +1131,8 @@ def process_market_signals(pair, timeframe):
             if pattern:
                 strength = "STRONG"
                 
-            session_type = get_session_type(closed_candle_time)
-            # Strict Session Block (V4.2 Sniper)
-            if session_type != "IN-SESSION":
-                return False
+            # Strict Session Block disabled to allow off-session signals
+            pass
                 
             is_marubozu = (
                 'Pattern_Marubozu' in closed_candle and 

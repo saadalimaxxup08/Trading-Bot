@@ -603,11 +603,8 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
         if sig_type is None:
             return False
             
-        # Verify Session overlap limit
-        session_type = local_get_session_type(closed_time)
-        if session_type != "IN-SESSION":
-            print(f"[SCAN BLOCKED] {pair} {timeframe} - OFF-SESSION at {closed_time}")
-            return False
+        # Verify Session overlap limit (Disabled to allow off-session signals)
+        pass
             
         now_ast = datetime.datetime.now(pytz.timezone("Asia/Riyadh"))
         now_utc = now_ast.astimezone(pytz.utc)
@@ -732,11 +729,12 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
             f"• RSI Room: {'✅' if rsi_room_ok else '❌'} ({rsi_val:.1f})\n"
             f"• EMA Trend: {'✅' if ema_trend_ok else '❌'}"
         )
+        session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
         alert_msg = f"✅ <b>V4.2 SNIPER SIGNAL DETECTED</b>\n\n" \
                     f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                     f"<b>Direction:</b> {dir_emoji}\n" \
                     f"<b>Entry Price:</b> {close_price:.5f}\n" \
-                    f"<b>Session:</b> 🟢 IN-SESSION\n" \
+                    f"<b>Session:</b> {session_label}\n" \
                     f"<b>Entry Time:</b> {time_str_ast}\n" \
                     f"<b>Expiry:</b> 15 Minutes\n\n" \
                     f"<b>📋 Rule Breakdown (5/5):</b>\n{rules_summary}\n\n" \
@@ -1053,9 +1051,9 @@ def start_background_scanner():
                                                 
                                             if pre_sig_type:
                                                 pre_session_type = local_get_session_type(live_time)
-                                                if pre_session_type == "IN-SESSION":
-                                                    pre_session_label = "🟢 IN-SESSION"
-                                                    pre_key = (pair, timeframe, live_time)
+                                                pre_session_label = "🟢 IN-SESSION" if pre_session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+                                                pre_key = (pair, timeframe, live_time)
+                                                if True:
                                                     if pre_key not in sent_pre_alerts:
                                                         sent_pre_alerts[pre_key] = (pre_sig_type, pre_session_label)
                                                         if len(sent_pre_alerts) > 100:
