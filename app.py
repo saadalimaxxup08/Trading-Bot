@@ -750,7 +750,7 @@ def local_resolve_pending_signals():
         return
         
     try:
-        res = supabase_client.table("signals").select("*").eq("status", "PENDING").execute()
+        res = supabase_client.table("signals").select("id,pair,timeframe,type,entry_price,time,exit_time,stake").eq("status", "PENDING").execute()
         pending = res.data if res.data else []
         if not pending:
             return
@@ -1175,7 +1175,7 @@ def start_background_scanner():
                         if supabase_client is None:
                             supabase_client = get_supabase_client()
                         if supabase_client is not None:
-                            supabase_client.table("signals").select("*").limit(1).execute()
+                            supabase_client.table("signals").select("id").limit(1).execute()
                             db_ok = True
                         else:
                             db_error_msg = "Supabase client is None"
@@ -1208,7 +1208,7 @@ def start_background_scanner():
                     wr_6h = 0.0
                     if db_ok:
                         try:
-                            res_6h = supabase_client.table("signals").select("*").gte("time", six_hours_ago.isoformat()).execute()
+                            res_6h = supabase_client.table("signals").select("status,timeframe,time").gte("time", six_hours_ago.isoformat()).execute()
                             sigs_6h = res_6h.data if res_6h.data else []
                             sigs_15m_6h = [s for s in sigs_6h if s["timeframe"].upper() == "15M"]
                             total_6h = len(sigs_15m_6h)
@@ -1256,7 +1256,7 @@ def fetch_signals_from_db(pair, timeframe):
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("*").eq("pair", pair).eq("timeframe", timeframe.upper()).order("time", desc=True).limit(50).execute()
+        res = supabase_client.table("signals").select("id,time,pair,timeframe,type,entry_price,exit_time,exit_price,status,strength,confirmations,patterns").eq("pair", pair).eq("timeframe", timeframe.upper()).order("time", desc=True).limit(50).execute()
         signals = []
         for r in (res.data if res.data else []):
             try:
@@ -1296,7 +1296,7 @@ def fetch_all_signals_from_db(limit=200):
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("*").order("time", desc=True).limit(limit).execute()
+        res = supabase_client.table("signals").select("id,time,pair,timeframe,type,entry_price,exit_time,exit_price,status,strength,confirmations,patterns").order("time", desc=True).limit(limit).execute()
         signals = []
         for r in (res.data if res.data else []):
             try:
@@ -2521,7 +2521,7 @@ if supabase_client is not None:
         start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
         start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
         
-        res_all = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).execute()
+        res_all = supabase_client.table("signals").select("id,time,pair,timeframe,status,type,stake,payout").gte("time", start_of_day_utc).execute()
         all_today_sigs = res_all.data if res_all.data else []
         sig_selected = [s for s in all_today_sigs if s["timeframe"].upper() == timeframe.upper()]
         today_sigs_count = len(sig_selected)
@@ -3122,7 +3122,7 @@ with col_center:
         last_sig = None
         if supabase_client is not None:
             try:
-                res_db = supabase_client.table("signals").select("*").limit(1).execute()
+                res_db = supabase_client.table("signals").select("id,pair,timeframe,time").limit(1).execute()
                 db_ok = True
                 db_msg = "Connected"
                 if res_db.data:
@@ -3289,7 +3289,7 @@ with col_center:
                 import requests
                 db_ok = False
                 try:
-                    supabase_client.table("signals").select("*").limit(1).execute()
+                    supabase_client.table("signals").select("id").limit(1).execute()
                     db_ok = True
                 except Exception:
                     pass
@@ -3319,7 +3319,7 @@ with col_center:
                     now_ry = datetime.datetime.now(tz_ry)
                     six_hours_ago = now_ry - datetime.timedelta(hours=6)
                     six_hours_ago_utc = six_hours_ago.astimezone(pytz.utc).isoformat()
-                    res_6h = supabase_client.table("signals").select("*").gte("time", six_hours_ago_utc).execute()
+                    res_6h = supabase_client.table("signals").select("status,timeframe,time").gte("time", six_hours_ago_utc).execute()
                     if res_6h.data:
                         sigs_6h = res_6h.data
                         total_6h = len(sigs_6h)
@@ -3356,13 +3356,13 @@ with col_center:
         if supabase_client is not None:
             try:
                 # Query signals from today (Jeddah Time)
-                res_all = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).order("time", desc=True).execute()
+                res_all = supabase_client.table("signals").select("id,timeframe").gte("time", start_of_day_utc).order("time", desc=True).execute()
                 all_today_sigs = res_all.data if res_all.data else []
                 # Filter strictly 15M
                 today_sigs_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "15M")
                 
                 # Fetch last 5 signals regardless of date
-                res_5 = supabase_client.table("signals").select("*").order("time", desc=True).limit(5).execute()
+                res_5 = supabase_client.table("signals").select("time,confirmations,status,type,diagnostics,pair").order("time", desc=True).limit(5).execute()
                 last_5_sigs = res_5.data if res_5.data else []
             except Exception as health_e:
                 st.error(f"Error fetching health stats: {health_e}")
@@ -3403,7 +3403,7 @@ with col_center:
         if supabase_client is not None:
             try:
                 # Fetch resolved signals
-                res_all_resolved = supabase_client.table("signals").select("*").order("time", desc=True).limit(20).execute()
+                res_all_resolved = supabase_client.table("signals").select("status,entry_price,exit_price,pair,type,time,confirmations").order("time", desc=True).limit(20).execute()
                 resolved_sigs = res_all_resolved.data if res_all_resolved.data else []
                 for s in resolved_sigs:
                     status = s["status"]

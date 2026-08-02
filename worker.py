@@ -235,7 +235,7 @@ def send_daily_summary():
         start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
         start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
         
-        res = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).order("time", desc=True).execute()
+        res = supabase_client.table("signals").select("time,status,stake,payout,pair,type,timeframe,session_type").gte("time", start_of_day_utc).order("time", desc=True).execute()
         signals = res.data if res.data else []
         
         date_str = now_ry.strftime("%d/%m/%Y")
@@ -608,7 +608,7 @@ def fetch_pending_signals():
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("*").eq("status", "PENDING").execute()
+        res = supabase_client.table("signals").select("id,pair,timeframe,type,entry_price,time,stake").eq("status", "PENDING").execute()
         return res.data if res.data else []
     except Exception as e:
         print(f"Failed to fetch pending signals: {e}")
@@ -1405,7 +1405,7 @@ def send_diagnostics_heartbeat():
         # 1. DB status
         db_ok = False
         try:
-            supabase_client.table("signals").select("*").limit(1).execute()
+            supabase_client.table("signals").select("id").limit(1).execute()
             db_ok = True
         except:
             pass
@@ -1437,7 +1437,7 @@ def send_diagnostics_heartbeat():
             now_ry = datetime.datetime.now(tz_ry)
             six_hours_ago = now_ry - datetime.timedelta(hours=6)
             six_hours_ago_utc = six_hours_ago.astimezone(pytz.utc).isoformat()
-            res_6h = supabase_client.table("signals").select("*").gte("time", six_hours_ago_utc).execute()
+            res_6h = supabase_client.table("signals").select("status,timeframe,time").gte("time", six_hours_ago_utc).execute()
             if res_6h.data:
                 sigs_6h = res_6h.data
                 total_6h = len(sigs_6h)
@@ -1476,7 +1476,7 @@ def send_hourly_summary():
         start_time_ry = now_ry - datetime.timedelta(hours=1)
         start_time_utc = start_time_ry.astimezone(pytz.utc).isoformat()
         
-        res = supabase_client.table("signals").select("*").gte("time", start_time_utc).order("time", desc=True).execute()
+        res = supabase_client.table("signals").select("timeframe,status,time,pair,confirmations,strength").gte("time", start_time_utc).order("time", desc=True).execute()
         signals = res.data if res.data else []
         
         period_str = f"{start_time_ry.strftime('%I:%M %p')} - {now_ry.strftime('%I:%M %p')}"
