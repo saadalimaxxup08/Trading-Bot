@@ -1017,9 +1017,9 @@ def start_background_scanner():
                 # Print live heartbeat log to console
                 print(f"[HEARTBEAT] Cloud Background Scanner active and scanning 8 pairs - {datetime.datetime.now().strftime('%H:%M:%S')}")
                 
-                # Run the scanning process using high-speed parallel batch downloading (Strict V4.2 15m)
-                for timeframe in ["15m"]:
-                    lookback = "5d"
+                # Run the scanning process using high-speed parallel batch downloading
+                for timeframe in ["5m", "15m"]:
+                    lookback = "2d" if timeframe == "5m" else "5d"
                     try:
                         # Fetch all tickers in parallel in a single HTTP request (extremely fast)
                         df_batch = download_market_batch(RADAR_PAIRS, timeframe, period=lookback)
@@ -2399,8 +2399,8 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"15 Minutes": "15m"}
-timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=0)
+timeframe_map = {"5 Minutes": "5m", "15 Minutes": "15m"}
+timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=1)
 timeframe = timeframe_map[timeframe_sel]
 
 # Expiry selection (1 to 5 candles)
@@ -2472,10 +2472,10 @@ if supabase_client is not None:
         
         res_all = supabase_client.table("signals").select("*").gte("time", start_of_day_utc).execute()
         all_today_sigs = res_all.data if res_all.data else []
-        sig_15m = [s for s in all_today_sigs if s["timeframe"].upper() == "15M"]
-        today_sigs_count = len(sig_15m)
+        sig_selected = [s for s in all_today_sigs if s["timeframe"].upper() == timeframe.upper()]
+        today_sigs_count = len(sig_selected)
         
-        resolved = [s for s in sig_15m if s["status"] in ["WIN", "LOSS"]]
+        resolved = [s for s in sig_selected if s["status"] in ["WIN", "LOSS"]]
         wins = sum(1 for s in resolved if s["status"] == "WIN")
         win_rate = (wins / len(resolved) * 100) if resolved else 0.0
     except Exception:

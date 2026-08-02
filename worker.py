@@ -106,7 +106,7 @@ ATR_THRESHOLDS = {
 }
 
 # Scan settings
-TIMEFRAMES = ["15m"]
+TIMEFRAMES = ["5m", "15m"]
 
 # Debug Mode tracking variables
 LAST_DEBUG_REPORT_TIME = None
@@ -272,7 +272,8 @@ def send_daily_summary():
                     
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
-                    expiry_val = "15m Exp"
+                    tf_val = sig.get("timeframe", "15M").upper()
+                    expiry_val = "5m Exp" if tf_val == "5M" else "15m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No in-session trades triggered.</i>\n"
@@ -297,7 +298,8 @@ def send_daily_summary():
                     
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
-                    expiry_val = "15m Exp"
+                    tf_val = sig.get("timeframe", "15M").upper()
+                    expiry_val = "5m Exp" if tf_val == "5M" else "15m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No off-session trades triggered.</i>\n"
