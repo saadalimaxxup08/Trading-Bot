@@ -927,10 +927,10 @@ DERIV_SYMBOL_MAP = {
     "VOL_100_1S": "1HZ100V",
     "CRASH_300": "C300",
     "BOOM_300": "B300",
-    "CRASH_500": "C500",
-    "BOOM_500": "B500",
-    "CRASH_1000": "C1000",
-    "BOOM_1000": "B1000"
+    "CRASH_500": "CRASH500",
+    "BOOM_500": "BOOM500",
+    "CRASH_1000": "CRASH1000",
+    "BOOM_1000": "BOOM1000"
 }
 
 async def _fetch_deriv_candles_async(symbol, granularity_seconds, count):
