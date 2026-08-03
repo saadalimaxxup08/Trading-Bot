@@ -1070,11 +1070,12 @@ def download_market_batch(pairs, timeframe, period="5d", count=250):
         print(f"[yfinance Batch Fallback Error]: {e}")
         return pd.DataFrame()
 
-def process_market_signals(pair, timeframe):
+def process_market_signals(pair, timeframe, df=None):
     lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
     
     try:
-        df = download_market_data(pair, timeframe, period=lookback)
+        if df is None or df.empty:
+            df = download_market_data(pair, timeframe, period=lookback)
         if df.empty:
             return
             
@@ -1706,16 +1707,32 @@ if __name__ == "__main__":
                 
             loop_start = time.time()
             
-            # Scan each pair across each timeframe
+            # Scan each pair across each timeframe (using parallel batch downloads)
             for timeframe in TIMEFRAMES:
+                lookback = "2d" if timeframe == "5m" else "5d"
+                df_batch = pd.DataFrame()
+                try:
+                    df_batch = download_market_batch(RADAR_PAIRS, timeframe, period=lookback)
+                except Exception as batch_dl_err:
+                    print(f"[Batch Download Error] for {timeframe}: {batch_dl_err}")
+                    
                 for pair in RADAR_PAIRS:
                     if not is_market_open(pair):
                         continue
-                    process_market_signals(pair, timeframe)
-                    # Speed up scan for Deriv WebSocket (no rate limit issues), throttle yfinance
-                    active_source = settings_manager.get_active_data_source()
-                    throttle = 0.1 if active_source == "Deriv WebSocket" else 1.5
-                    time.sleep(throttle)
+                        
+                    # Extract this pair's DataFrame from the batch
+                    df_pair = pd.DataFrame()
+                    if not df_batch.empty:
+                        try:
+                            if isinstance(df_batch.columns, pd.MultiIndex):
+                                if pair in df_batch.columns.levels[0]:
+                                    df_pair = df_batch[pair].dropna()
+                            elif pair in df_batch:
+                                df_pair = df_batch[pair].dropna()
+                        except Exception as ext_err:
+                            print(f"[Batch Extract Error] for {pair}: {ext_err}")
+                            
+                    process_market_signals(pair, timeframe, df=df_pair)
             
             # Resolve pending items
             resolve_pending_signals()
