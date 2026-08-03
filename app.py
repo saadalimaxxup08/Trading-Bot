@@ -3220,11 +3220,12 @@ with col_center:
                             else:
                                 last_time_ast = last_time.astimezone(ast_tz)
                             
-                            source = "Deriv WS" if pair in [
+                            active_source = settings_manager.get_active_data_source()
+                            source = "Deriv WS" if (active_source == "Deriv WebSocket" or pair in [
                                 "VOL_10", "VOL_25", "VOL_50", "VOL_75", "VOL_100",
                                 "VOL_10_1S", "VOL_25_1S", "VOL_50_1S", "VOL_75_1S", "VOL_100_1S",
                                 "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
-                            ] else "yfinance"
+                            ]) else "yfinance"
                             
                             price_data.append({
                                 "Pair": pair.replace("=X", ""),
