@@ -1,9 +1,14 @@
 import os
 import json
 import threading
+import time
 
 SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 _lock = threading.Lock()
+
+# In-memory settings cache to save database egress
+_cache = {}
+_CACHE_TTL = 30  # seconds
 
 def get_supabase_client():
     try:
@@ -31,29 +36,42 @@ def get_supabase_client():
     return None
 
 def get_active_data_source():
-    # 1. Try to read settings from Supabase so both servers stay synchronized in real-time
+    now = time.time()
+    with _lock:
+        if "data_source" in _cache and (now - _cache.get("data_source_time", 0)) < _CACHE_TTL:
+            return _cache["data_source"]
+
+    # Cache expired or not found, query Supabase
     client = get_supabase_client()
+    source = "Deriv WebSocket"
     if client is not None:
         try:
             res = client.table("signals").select("status").eq("id", "setting_active_data_source").execute()
             if res.data:
-                return res.data[0]["status"]
+                source = res.data[0]["status"]
         except Exception as e:
             print(f"[Settings Supabase Read Error]: {e}")
+            # Fallback to local file if database fails
+            try:
+                if os.path.exists(SETTINGS_FILE):
+                    with open(SETTINGS_FILE, "r") as f:
+                        data = json.load(f)
+                        source = data.get("data_source", "Deriv WebSocket")
+            except Exception as read_err:
+                print(f"[Local Settings Fallback Read Error]: {read_err}")
 
-    # 2. Local fallback if Supabase is offline or not configured yet
     with _lock:
-        try:
-            if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, "r") as f:
-                    data = json.load(f)
-                    return data.get("data_source", "Deriv WebSocket")
-        except Exception as e:
-            print(f"[Settings Manager Local Read Error]: {e}")
-        return "Deriv WebSocket"
+        _cache["data_source"] = source
+        _cache["data_source_time"] = now
+    return source
 
 def set_active_data_source(source):
-    # 1. Try to write settings to Supabase
+    # Invalidate cache
+    with _lock:
+        if "data_source" in _cache:
+            del _cache["data_source"]
+
+    # Write to Supabase
     client = get_supabase_client()
     if client is not None:
         try:
@@ -76,7 +94,7 @@ def set_active_data_source(source):
         except Exception as e:
             print(f"[Settings Supabase Write Error]: {e}")
 
-    # 2. Always write to local JSON as secondary fallback
+    # Write to local JSON
     with _lock:
         try:
             data = {}
@@ -91,17 +109,33 @@ def set_active_data_source(source):
             print(f"[Settings Manager Local Write Error]: {e}")
 
 def get_active_host():
+    now = time.time()
+    with _lock:
+        if "active_host" in _cache and (now - _cache.get("active_host_time", 0)) < _CACHE_TTL:
+            return _cache["active_host"]
+
+    # Cache expired or not found, query Supabase
     client = get_supabase_client()
+    host = "Render"
     if client is not None:
         try:
             res = client.table("signals").select("status").eq("id", "setting_active_host").execute()
             if res.data:
-                return res.data[0]["status"]
+                host = res.data[0]["status"]
         except Exception as e:
             print(f"[Settings Supabase Read Host Error]: {e}")
-    return "Render"
+
+    with _lock:
+        _cache["active_host"] = host
+        _cache["active_host_time"] = now
+    return host
 
 def set_active_host(host):
+    # Invalidate cache
+    with _lock:
+        if "active_host" in _cache:
+            del _cache["active_host"]
+
     import datetime
     client = get_supabase_client()
     if client is not None:
