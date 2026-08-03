@@ -2312,7 +2312,7 @@ def run_backtest(pair, timeframe):
                 confirmations = row['Put_Score']
                 
             if sig_type:
-                if row['Low_Volatility']:
+                if row.get('Low_Volatility', False):
                     continue
                 entry_price = row['Close']
                 exit_price = next_row['Close']
@@ -2928,7 +2928,7 @@ with col_center:
                 
                 # Volatility Check for Active Pair
                 volatility_low = False
-                if volatility_filter_enabled and closed_candle['Low_Volatility']:
+                if volatility_filter_enabled and closed_candle.get('Low_Volatility', False):
                     volatility_low = True
                     st.warning("⚠️ VOLATILITY WARNING: ATR IS EXTREMELY LOW. SCANNING SUSPENDED.")
                     
