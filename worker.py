@@ -525,9 +525,9 @@ def check_signals(df, pair=None):
     else:
         vol_increasing = vol > vol_prev
     
-    # 5. RSI Room to grow
-    rsi_room_call = rsi < 45
-    rsi_room_put = rsi > 55
+    # 5. RSI Room to grow (Aligned with V4 Sniper Ranges)
+    rsi_room_call = rsi <= 55
+    rsi_room_put = rsi >= 45
     
     # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations + V4 Sniper Filters)
     call_scores = []
@@ -1437,9 +1437,9 @@ def send_diagnostics_heartbeat():
             now_ry = datetime.datetime.now(tz_ry)
             six_hours_ago = now_ry - datetime.timedelta(hours=6)
             six_hours_ago_utc = six_hours_ago.astimezone(pytz.utc).isoformat()
-            res_6h = supabase_client.table("signals").select("status,timeframe,time").gte("time", six_hours_ago_utc).execute()
+            res_6h = supabase_client.table("signals").select("status,timeframe,time,pair").gte("time", six_hours_ago_utc).execute()
             if res_6h.data:
-                sigs_6h = res_6h.data
+                sigs_6h = [s for s in res_6h.data if s.get("pair") not in ["SETTINGS", "CONFIG"]]
                 total_6h = len(sigs_6h)
                 resolved_6h = [s for s in sigs_6h if s["status"] in ["WIN", "LOSS"]]
                 wins_6h = sum(1 for s in resolved_6h if s["status"] == "WIN")
