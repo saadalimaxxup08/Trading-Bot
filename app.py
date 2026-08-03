@@ -647,7 +647,7 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
         ema200_slope_up = ema_slope > 0
         
         # Additional V4.2 filters that were checked
-        rsi_room_ok = (rsi_val < 45) if sig_type == "CALL" else (rsi_val > 55)
+        rsi_room_ok = (rsi_val <= 55) if sig_type == "CALL" else (rsi_val >= 45)
         ema_trend_ok = (close_price > ema50_val or ema50_val > ema200_val) if sig_type == "CALL" else (close_price < ema50_val or ema50_val < ema200_val)
         
         pips_mult = get_pip_multiplier(pair)
@@ -2045,9 +2045,9 @@ def check_signals(df, pair=None):
     else:
         vol_increasing = vol > vol_prev
     
-    # 5. RSI Room to grow
-    rsi_room_call = rsi < 45
-    rsi_room_put = rsi > 55
+    # 5. RSI Room to grow (Aligned with V4 Sniper Ranges)
+    rsi_room_call = rsi <= 55
+    rsi_room_put = rsi >= 45
     
     # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations + V4 Sniper Filters)
     call_scores = []
@@ -3189,7 +3189,64 @@ with col_center:
         else:
             st.info("⚪ **Render Cloud Bot Status:** No heartbeat data found.")
             
-        # 2. Scanner Thread Status
+        # 2. Live Prices Monitor
+        st.markdown("### 🔍 LIVE PRICES MONITOR (ALL PAIRS)")
+        if st.button("🔄 Fetch Live Prices for All Pairs", use_container_width=True):
+            with st.spinner("Fetching current prices in parallel from yfinance and Deriv..."):
+                try:
+                    import worker
+                    df_batch = worker.download_market_batch(worker.RADAR_PAIRS, "5m", period="1d")
+                    
+                    price_data = []
+                    for pair in worker.RADAR_PAIRS:
+                        df_pair = pd.DataFrame()
+                        if not df_batch.empty:
+                            try:
+                                if isinstance(df_batch.columns, pd.MultiIndex):
+                                    if pair in df_batch.columns.levels[0]:
+                                        df_pair = df_batch[pair].dropna()
+                                elif pair in df_batch:
+                                    df_pair = df_batch[pair].dropna()
+                            except:
+                                pass
+                                
+                        if not df_pair.empty:
+                            last_close = float(df_pair['Close'].iloc[-1])
+                            last_time = df_pair.index[-1]
+                            import pytz
+                            ast_tz = pytz.timezone("Asia/Riyadh")
+                            if last_time.tzinfo is None:
+                                last_time_ast = pytz.utc.localize(last_time).astimezone(ast_tz)
+                            else:
+                                last_time_ast = last_time.astimezone(ast_tz)
+                            
+                            source = "Deriv WS" if pair in [
+                                "VOL_10", "VOL_25", "VOL_50", "VOL_75", "VOL_100",
+                                "VOL_10_1S", "VOL_25_1S", "VOL_50_1S", "VOL_75_1S", "VOL_100_1S",
+                                "CRASH_500", "BOOM_500", "CRASH_1000", "BOOM_1000"
+                            ] else "yfinance"
+                            
+                            price_data.append({
+                                "Pair": pair.replace("=X", ""),
+                                "Current Price": f"{last_close:.5f}" if last_close < 10 else f"{last_close:.2f}",
+                                "Last Update (AST)": last_time_ast.strftime("%Y-%m-%d %I:%M:%S %p"),
+                                "Source": source
+                            })
+                        else:
+                            price_data.append({
+                                "Pair": pair.replace("=X", ""),
+                                "Current Price": "OFFLINE/EMPTY",
+                                "Last Update (AST)": "N/A",
+                                "Source": "Error"
+                            })
+                            
+                    df_prices = pd.DataFrame(price_data)
+                    st.dataframe(df_prices, use_container_width=True, hide_index=True)
+                    st.success("✅ Successfully fetched real-time prices for all 38 pairs!")
+                except Exception as ex_p:
+                    st.error(f"Error fetching prices: {ex_p}")
+            
+        # 3. Scanner Thread Status
         st.markdown("### ⚙️ SCANNER THREAD STATUS")
         import threading
         thread_alive = any(t.name == "scanner_thread_func" for t in threading.enumerate())
@@ -3207,7 +3264,7 @@ with col_center:
         with s3:
             st.metric("Current Market Session", session_label, help="London + New York overlap: 10AM-10PM AST")
             
-        # 3. V4.2 Logic Verifier
+        # 4. V4.2 Logic Verifier
         st.markdown("### 🧪 V4.2 STRATEGY LOGIC VERIFIER")
         if st.button("Run Test Signal Logic", use_container_width=True):
             try:
@@ -3339,9 +3396,9 @@ with col_center:
                     now_ry = datetime.datetime.now(tz_ry)
                     six_hours_ago = now_ry - datetime.timedelta(hours=6)
                     six_hours_ago_utc = six_hours_ago.astimezone(pytz.utc).isoformat()
-                    res_6h = supabase_client.table("signals").select("status,timeframe,time").gte("time", six_hours_ago_utc).execute()
+                    res_6h = supabase_client.table("signals").select("status,timeframe,time,pair").gte("time", six_hours_ago_utc).execute()
                     if res_6h.data:
-                        sigs_6h = res_6h.data
+                        sigs_6h = [s for s in res_6h.data if s.get("pair") not in ["SETTINGS", "CONFIG"]]
                         total_6h = len(sigs_6h)
                         resolved_6h = [s for s in sigs_6h if s["status"] in ["WIN", "LOSS"]]
                         wins_6h = sum(1 for s in resolved_6h if s["status"] == "WIN")
