@@ -3438,8 +3438,9 @@ with col_center:
                 # Query signals from today (Jeddah Time)
                 res_all = supabase_client.table("signals").select("id,timeframe").neq("pair", "SETTINGS").neq("pair", "CONFIG").gte("time", start_of_day_utc).order("time", desc=True).execute()
                 all_today_sigs = res_all.data if res_all.data else []
-                # Filter strictly 15M
-                today_sigs_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "15M")
+                # Filter by timeframes
+                today_5m_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "5M")
+                today_15m_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "15M")
                 
                 # Fetch last 5 signals regardless of date
                 res_5 = supabase_client.table("signals").select("time,confirmations,status,type,diagnostics,pair").neq("pair", "SETTINGS").neq("pair", "CONFIG").order("time", desc=True).limit(5).execute()
@@ -3447,7 +3448,11 @@ with col_center:
             except Exception as health_e:
                 st.error(f"Error fetching health stats: {health_e}")
                 
-        st.metric("15M Signals Today", today_sigs_count)
+        stat_c1, stat_c2 = st.columns(2)
+        with stat_c1:
+            st.metric("5M Signals Today", today_5m_count)
+        with stat_c2:
+            st.metric("15M Signals Today", today_15m_count)
         
         st.markdown("**Last 5 Signals Table**")
         if last_5_sigs:
