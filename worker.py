@@ -1639,8 +1639,43 @@ def resolve_pending_signals():
         except Exception as e:
             print(f"Error resolving pending signals for {pair} [{timeframe}]: {e}")
 
+def start_dummy_server():
+    """
+    Starts a lightweight dummy HTTP server in a daemon thread.
+    This binds to Render's injected PORT environment variable to prevent Render
+    from marking the Web Service deployment as failed and restarting the container.
+    """
+    import http.server
+    import socketserver
+    import threading
+    
+    class DummyHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Bot is alive and running!")
+            
+        def log_message(self, format, *args):
+            pass
+
+    port = int(os.environ.get("PORT", 8080))
+    
+    def run_server():
+        try:
+            socketserver.TCPServer.allow_reuse_address = True
+            with socketserver.TCPServer(("", port), DummyHandler) as httpd:
+                print(f"[Web Server] Heartbeat server successfully listening on port {port}.")
+                httpd.serve_forever()
+        except Exception as se:
+            print(f"[Web Server Error]: {se}")
+
+    t = threading.Thread(target=run_server, name="dummy_web_server", daemon=True)
+    t.start()
+
 # ----------------- MAIN LOOP -----------------
 if __name__ == "__main__":
+    start_dummy_server()
     print("====================================================")
     print("[START] BINARY PRO 24/7 CENTRAL SCANNER STARTING")
     print(f"Pairs: {', '.join(RADAR_PAIRS)}")
