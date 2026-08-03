@@ -3120,13 +3120,26 @@ with col_center:
         db_ok = False
         db_msg = "Unknown Error"
         last_sig = None
+        hb_diff_seconds = None
+        active_host = "Unknown"
         if supabase_client is not None:
             try:
-                res_db = supabase_client.table("signals").select("id,pair,timeframe,time").limit(1).execute()
+                # Fetch last trade signal
+                res_db = supabase_client.table("signals").select("id,pair,timeframe,time").order("time", desc=True).limit(1).execute()
                 db_ok = True
                 db_msg = "Connected"
                 if res_db.data:
                     last_sig = res_db.data[0]
+                    
+                # Fetch active host config to calculate heartbeat age
+                res_host = supabase_client.table("signals").select("time,status").eq("id", "setting_active_host").execute()
+                if res_host.data:
+                    active_host = res_host.data[0]["status"]
+                    hb_time = pd.to_datetime(res_host.data[0]["time"])
+                    now_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+                    if hb_time.tzinfo is None:
+                        hb_time = pytz.utc.localize(hb_time)
+                    hb_diff_seconds = (now_utc - hb_time).total_seconds()
             except Exception as dbe:
                 db_msg = str(dbe)
                 
@@ -3168,6 +3181,13 @@ with col_center:
             st.metric("Telegram Connection", "🟢 Valid" if tg_ok else "🔴 Invalid", f"Bot: {bot_name}", help=tg_msg)
         with c3:
             st.metric("Data Provider Status", "🟢 Online" if provider_ok else "🔴 Offline", f"Active: {active_provider}", help=provider_msg)
+        if hb_diff_seconds is not None:
+            if hb_diff_seconds < 120:
+                st.success(f"🟢 **Render Cloud Bot Status:** ONLINE (Last Heartbeat: {int(hb_diff_seconds)}s ago on {active_host})")
+            else:
+                st.warning(f"🔴 **Render Cloud Bot Status:** STANDBY / OFFLINE (Last Heartbeat: {int(hb_diff_seconds/60)} minutes ago on {active_host})")
+        else:
+            st.info("⚪ **Render Cloud Bot Status:** No heartbeat data found.")
             
         # 2. Scanner Thread Status
         st.markdown("### ⚙️ SCANNER THREAD STATUS")

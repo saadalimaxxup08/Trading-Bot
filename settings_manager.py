@@ -102,12 +102,13 @@ def get_active_host():
     return "Render"
 
 def set_active_host(host):
+    import datetime
     client = get_supabase_client()
     if client is not None:
         try:
             payload = {
                 "id": "setting_active_host",
-                "time": "1970-01-01T00:00:00+00:00",
+                "time": datetime.datetime.utcnow().isoformat() + "+00:00",
                 "pair": "SETTINGS",
                 "timeframe": "CONFIG",
                 "type": "active_host",

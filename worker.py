@@ -1663,6 +1663,12 @@ if __name__ == "__main__":
                 time.sleep(15)
                 continue
                 
+            # Update Host Heartbeat to prove in real-time that the bot is running
+            try:
+                settings_manager.set_active_host(local_host)
+            except Exception as hb_err:
+                print(f"[Heartbeat Update Error]: {hb_err}")
+                
             loop_start = time.time()
             
             # Scan each pair across each timeframe
