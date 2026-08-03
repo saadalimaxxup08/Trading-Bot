@@ -750,7 +750,7 @@ def local_resolve_pending_signals():
         return
         
     try:
-        res = supabase_client.table("signals").select("id,pair,timeframe,type,entry_price,time,exit_time,stake").eq("status", "PENDING").execute()
+        res = supabase_client.table("signals").select("id,pair,timeframe,type,entry_price,time,exit_time").neq("pair", "SETTINGS").neq("pair", "CONFIG").eq("status", "PENDING").execute()
         pending = res.data if res.data else []
         if not pending:
             return
@@ -1296,7 +1296,7 @@ def fetch_all_signals_from_db(limit=200):
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("id,time,pair,timeframe,type,entry_price,exit_time,exit_price,status,strength,confirmations,patterns").order("time", desc=True).limit(limit).execute()
+        res = supabase_client.table("signals").select("id,time,pair,timeframe,type,entry_price,exit_time,exit_price,status,strength,confirmations,patterns").neq("pair", "SETTINGS").neq("pair", "CONFIG").order("time", desc=True).limit(limit).execute()
         signals = []
         for r in (res.data if res.data else []):
             try:
@@ -2521,7 +2521,7 @@ if supabase_client is not None:
         start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
         start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
         
-        res_all = supabase_client.table("signals").select("id,time,pair,timeframe,status,type,stake,payout").gte("time", start_of_day_utc).execute()
+        res_all = supabase_client.table("signals").select("id,time,pair,timeframe,status,type").neq("pair", "SETTINGS").neq("pair", "CONFIG").gte("time", start_of_day_utc).execute()
         all_today_sigs = res_all.data if res_all.data else []
         sig_selected = [s for s in all_today_sigs if s["timeframe"].upper() == timeframe.upper()]
         today_sigs_count = len(sig_selected)
@@ -2965,15 +2965,15 @@ with col_center:
                     row=1, col=1
                 )
                 
-                if show_emas:
+                if show_emas and 'EMA_50' in df_live.columns and 'EMA_200' in df_live.columns:
                     fig.add_trace(go.Scatter(x=df_live.index, y=df_live['EMA_50'], line=dict(color='#ff9800', width=1.5), name="EMA 50"), row=1, col=1)
                     fig.add_trace(go.Scatter(x=df_live.index, y=df_live['EMA_200'], line=dict(color='#9c27b0', width=2.0), name="EMA 200"), row=1, col=1)
                 
-                if show_bb:
+                if show_bb and 'BB_Upper' in df_live.columns and 'BB_Lower' in df_live.columns:
                     fig.add_trace(go.Scatter(x=df_live.index, y=df_live['BB_Upper'], line=dict(color='#1e88e5', width=1, dash='dash'), name="BB Upper"), row=1, col=1)
                     fig.add_trace(go.Scatter(x=df_live.index, y=df_live['BB_Lower'], line=dict(color='#1e88e5', width=1, dash='dash'), name="BB Lower"), row=1, col=1)
                 
-                if show_sr:
+                if show_sr and 'Support' in df_live.columns and 'Resistance' in df_live.columns:
                     sup_val = df_live['Support'].iloc[-1]
                     res_val = df_live['Resistance'].iloc[-1]
                     fig.add_hline(y=sup_val, line=dict(color='#00e676', width=1, dash='dot'), annotation_text=f"Support: {sup_val:.5f}", row=1, col=1)
@@ -3018,16 +3018,18 @@ with col_center:
                         )
                 
                 # RSI
-                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['RSI_14'], line=dict(color='#fbc02d', width=1.5), name="RSI"), row=2, col=1)
-                fig.add_hline(y=70, line=dict(color='#ff1744', width=1, dash='dash'), row=2, col=1)
-                fig.add_hline(y=50, line=dict(color='#ffffff', width=0.8, dash='dot'), row=2, col=1)
-                fig.add_hline(y=30, line=dict(color='#00e676', width=1, dash='dash'), row=2, col=1)
+                if 'RSI_14' in df_live.columns:
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['RSI_14'], line=dict(color='#fbc02d', width=1.5), name="RSI"), row=2, col=1)
+                    fig.add_hline(y=70, line=dict(color='#ff1744', width=1, dash='dash'), row=2, col=1)
+                    fig.add_hline(y=50, line=dict(color='#ffffff', width=0.8, dash='dot'), row=2, col=1)
+                    fig.add_hline(y=30, line=dict(color='#00e676', width=1, dash='dash'), row=2, col=1)
                 
                 # MACD
-                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD'], line=dict(color='#29b6f6', width=1.2), name="MACD"), row=3, col=1)
-                fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD_Signal'], line=dict(color='#ab47bc', width=1.2), name="Signal"), row=3, col=1)
-                colors_hist = ['#00e676' if val >= 0 else '#ff1744' for val in df_live['MACD_Hist']]
-                fig.add_trace(go.Bar(x=df_live.index, y=df_live['MACD_Hist'], marker_color=colors_hist, name="Hist"), row=3, col=1)
+                if 'MACD' in df_live.columns and 'MACD_Signal' in df_live.columns and 'MACD_Hist' in df_live.columns:
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD'], line=dict(color='#29b6f6', width=1.2), name="MACD"), row=3, col=1)
+                    fig.add_trace(go.Scatter(x=df_live.index, y=df_live['MACD_Signal'], line=dict(color='#ab47bc', width=1.2), name="Signal"), row=3, col=1)
+                    colors_hist = ['#00e676' if val >= 0 else '#ff1744' for val in df_live['MACD_Hist']]
+                    fig.add_trace(go.Bar(x=df_live.index, y=df_live['MACD_Hist'], marker_color=colors_hist, name="Hist"), row=3, col=1)
                 
                 # Volume
                 colors_vol = ['#00e676' if close >= open_p else '#ff1744' for close, open_p in zip(df_live['Close'], df_live['Open'])]
@@ -3434,13 +3436,13 @@ with col_center:
         if supabase_client is not None:
             try:
                 # Query signals from today (Jeddah Time)
-                res_all = supabase_client.table("signals").select("id,timeframe").gte("time", start_of_day_utc).order("time", desc=True).execute()
+                res_all = supabase_client.table("signals").select("id,timeframe").neq("pair", "SETTINGS").neq("pair", "CONFIG").gte("time", start_of_day_utc).order("time", desc=True).execute()
                 all_today_sigs = res_all.data if res_all.data else []
                 # Filter strictly 15M
                 today_sigs_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "15M")
                 
                 # Fetch last 5 signals regardless of date
-                res_5 = supabase_client.table("signals").select("time,confirmations,status,type,diagnostics,pair").order("time", desc=True).limit(5).execute()
+                res_5 = supabase_client.table("signals").select("time,confirmations,status,type,diagnostics,pair").neq("pair", "SETTINGS").neq("pair", "CONFIG").order("time", desc=True).limit(5).execute()
                 last_5_sigs = res_5.data if res_5.data else []
             except Exception as health_e:
                 st.error(f"Error fetching health stats: {health_e}")
@@ -3480,8 +3482,7 @@ with col_center:
         postmortem_list = []
         if supabase_client is not None:
             try:
-                # Fetch resolved signals
-                res_all_resolved = supabase_client.table("signals").select("status,entry_price,exit_price,pair,type,time,confirmations").order("time", desc=True).limit(20).execute()
+                res_all_resolved = supabase_client.table("signals").select("status,entry_price,exit_price,pair,type,time,confirmations").neq("pair", "SETTINGS").neq("pair", "CONFIG").order("time", desc=True).limit(20).execute()
                 resolved_sigs = res_all_resolved.data if res_all_resolved.data else []
                 for s in resolved_sigs:
                     status = s["status"]
