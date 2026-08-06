@@ -148,6 +148,7 @@ LAST_HOURLY_SENT_HOUR = None
 LAST_DAILY_SENT_DATE = None
 LAST_DIAGNOSTICS_SENT_TIME = None
 LAST_SCAN_SCORES = {}
+sent_pre_alerts = {}
 
 def get_supabase_client():
     if not SUPABASE_URL or "your-project-id" in SUPABASE_URL:
@@ -1225,18 +1226,70 @@ def process_market_signals(pair, timeframe, df=None):
         if df is None or df.empty:
             df = download_market_data(pair, timeframe, period=lookback)
         if df.empty:
-            return
+            return False
             
         df = calculate_indicators(df)
         df = check_signals(df, pair)
         
         if len(df) < 2:
-            return
+            return False
+
+        # ── Pre-Alert Evaluation (Wilder's ADX & V5 Engine Support) ──
+        now_utc = datetime.datetime.now(pytz.utc)
+        tf_minutes = 5 if timeframe == "5m" else 15
+        is_pre_alert_window = (now_utc.minute % tf_minutes == (tf_minutes - 1)) and (30 <= now_utc.second <= 59)
+        
+        if is_pre_alert_window:
+            try:
+                live_row = df.iloc[-1]
+                live_time = df.index[-1]
+                
+                min_pre_score = 4
+                pre_sig_type = None
+                max_call = max(
+                    int(live_row.get('Sniper_Call_Score', 0)),
+                    int(live_row.get('Balanced_Call_Score', 0)),
+                    int(live_row.get('Aggressive_Call_Score', 0))
+                )
+                max_put = max(
+                    int(live_row.get('Sniper_Put_Score', 0)),
+                    int(live_row.get('Balanced_Put_Score', 0)),
+                    int(live_row.get('Aggressive_Put_Score', 0))
+                )
+                if max_call >= min_pre_score:
+                    pre_sig_type = "CALL"
+                elif max_put >= min_pre_score:
+                    pre_sig_type = "PUT"
+                    
+                if pre_sig_type:
+                    pre_session_type = get_session_type(live_time)
+                    pre_session_label = "🟢 IN-SESSION" if pre_session_type == "IN-SESSION" else "🟡 OFF-SESSION"
+                    pre_key = (pair, timeframe, live_time)
+                    
+                    if pre_key not in sent_pre_alerts:
+                        sent_pre_alerts[pre_key] = (pre_sig_type, pre_session_label)
+                        if len(sent_pre_alerts) > 200:
+                            sent_pre_alerts.pop(next(iter(sent_pre_alerts)))
+                            
+                        # Send Pre-Alert
+                        ast_tz = pytz.timezone("Asia/Riyadh")
+                        now_ast = datetime.datetime.now(ast_tz)
+                        pre_time_str = f"{now_ast.strftime('%I:%M:%S %p AST')} ({now_utc.strftime('%I:%M:%S %p UTC')})"
+                        pre_dir = "🟢 CALL" if pre_sig_type == "CALL" else "🔴 PUT"
+                        pre_msg = f"🚨 <b>PRE-ALERT LOADING...</b>\n\n" \
+                                  f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                                  f"<b>Timeframe:</b> {timeframe.upper()}\n" \
+                                  f"<b>Direction:</b> {pre_dir}\n" \
+                                  f"<b>Session:</b> {pre_session_label}\n" \
+                                  f"<b>Time:</b> {pre_time_str}\n" \
+                                  f"<b>Status:</b> Waiting for final confirmation...\n" \
+                                  f"<b>Note:</b> Ye Final Signal nahi hai. Sirf Alert hai."
+                        send_telegram_alert(pre_msg)
+                        print(f"[PRE-ALERT] Sent pre-alert for {pair} {timeframe} {pre_sig_type}")
+            except Exception as pre_err:
+                print(f"[PRE-ALERT ERROR]: {pre_err}")
 
         # Smart Closed Candle selection (bypass yfinance active candle latency)
-        import datetime
-        import pytz
-        now_utc = datetime.datetime.now(pytz.utc)
         delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
         
         last_candle_time = df.index[-1]
@@ -1276,7 +1329,7 @@ def process_market_signals(pair, timeframe, df=None):
         volatility_low = closed_candle.get('Low_Volatility', False)
         if volatility_low:
             print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {ast_time_str} - Session: {session_label} - Score: {max_any_score}/5 - REASON BLOCKED: LOW_VOLATILITY")
-            return
+            return False
             
         reason = get_scan_rejection_reason(closed_candle, pair, timeframe)
         print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {ast_time_str} - Session: {session_label} - Max Score: {max_any_score}/5 - REASON BLOCKED (If Sniper): {reason}")
@@ -1288,6 +1341,7 @@ def process_market_signals(pair, timeframe, df=None):
             {"mode": "AGGRESSIVE", "call_col": "Aggressive_Call_Score", "put_col": "Aggressive_Put_Score", "min_score": 5, "expiry": "5 Minutes" if timeframe == "5m" else "15 Minutes", "expiry_delta": delta_t}
         ]
 
+        signal_fired_on_this_candle = False
         for strat in strategies:
             mode = strat["mode"]
             call_score = int(closed_candle.get(strat["call_col"], 0))
@@ -1355,6 +1409,7 @@ def process_market_signals(pair, timeframe, df=None):
             
             success = save_signal_to_db(new_sig)
             if success:
+                signal_fired_on_this_candle = True
                 save_trade_log_to_db(new_sig, closed_candle, session_type, mode == "SNIPER")
                 
                 # Format timestamps
@@ -1385,6 +1440,26 @@ def process_market_signals(pair, timeframe, df=None):
                           f"<b>Reason:</b> {mode} strategy criteria met\n" \
                           f"<b>Risk:</b> {'Low' if mode == 'SNIPER' else ('Medium' if mode == 'BALANCED' else 'High')}"
                 send_telegram_alert(tg_text)
+                
+        # Cancel Alert Evaluation
+        pre_key_closed = (pair, timeframe, closed_candle_time)
+        if pre_key_closed in sent_pre_alerts:
+            if signal_fired_on_this_candle:
+                sent_pre_alerts.pop(pre_key_closed, None)
+            else:
+                pre_dir, pre_session_label = sent_pre_alerts[pre_key_closed]
+                cancel_time_str = f"{ast_now.strftime('%I:%M:%S %p AST')} ({now_utc.astimezone(pytz.utc).strftime('%I:%M:%S %p UTC')})"
+                cancel_msg = f"❌ <b>SIGNAL CANCELLED</b>\n\n" \
+                             f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
+                             f"<b>Timeframe:</b> {timeframe.upper()}\n" \
+                             f"<b>Direction:</b> {pre_dir}\n" \
+                             f"<b>Session:</b> {pre_session_label}\n" \
+                             f"<b>Time:</b> {cancel_time_str}\n" \
+                             f"<b>Reason:</b> Signal Not Perfect. Last confirmation failed.\n" \
+                             f"<b>Status:</b> Plan Changed. Waiting for next setup."
+                send_telegram_alert(cancel_msg)
+                sent_pre_alerts.pop(pre_key_closed, None)
+                
         return True
     except Exception as e:
         print(f"Error processing market signals for {pair} [{timeframe}]: {e}")
