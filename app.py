@@ -2435,9 +2435,9 @@ def calculate_radar_data():
     return radar_results
 
 # ----------------- BACKTEST MODULE -----------------
-def run_backtest(pair, timeframe):
+def run_backtest(pair, timeframe, mode="SNIPER"):
     days = 7 if timeframe == "1m" else 30
-    st.info(f"Running backtest for {pair} on {timeframe} timeframe over the past {days} days...")
+    st.info(f"Running backtest for {pair} ({mode} Strategy) on {timeframe} timeframe over the past {days} days...")
     
     try:
         df = download_market_data(pair, timeframe, period=f"{days}d", count=10000)
@@ -2461,36 +2461,59 @@ def run_backtest(pair, timeframe):
         ties = 0
         backtest_signals = []
         
-        for i in range(50, len(df) - 1):
+        # Determine strategy columns and score parameters
+        if mode == "SNIPER":
+            call_col = "Sniper_Call_Score"
+            put_col = "Sniper_Put_Score"
+            min_score = 5
+            # SNIPER has 15 min expiry. For 5m charts, 15 min is 3 candles. For 15m charts, it is 1 candle.
+            expiry_offset = 3 if timeframe == "5m" else 1
+        elif mode == "BALANCED":
+            call_col = "Balanced_Call_Score"
+            put_col = "Balanced_Put_Score"
+            min_score = 5
+            # BALANCED has 5 min expiry on 5m chart (1 candle) and 15 min on 15m chart (1 candle)
+            expiry_offset = 1
+        else: # AGGRESSIVE
+            call_col = "Aggressive_Call_Score"
+            put_col = "Aggressive_Put_Score"
+            min_score = 5
+            # AGGRESSIVE has 5 min expiry on 5m chart (1 candle) and 15 min on 15m chart (1 candle)
+            expiry_offset = 1
+            
+        for i in range(50, len(df) - expiry_offset):
             row = df.iloc[i]
-            next_row = df.iloc[i+1]
+            exit_row = df.iloc[i + expiry_offset]
             
             sig_type = None
             confirmations = 0
             
-            # Determine score threshold based on pair Tier
-            min_score = 4 if pair in TIER_1_PAIRS else 5
-            
-            if row['Call_Score'] >= min_score:
+            # Tier 1 override for score threshold (if pair is Tier 1, trigger at score 4)
+            # Sniper is strict 5/5, but Balanced/Aggressive can use Tier 1 rules if configured
+            active_min_score = min_score
+            if pair in TIER_1_PAIRS and mode == "SNIPER":
+                active_min_score = 4
+                
+            if row[call_col] >= active_min_score:
                 sig_type = "CALL"
-                confirmations = row['Call_Score']
-            elif row['Put_Score'] >= min_score:
+                confirmations = row[call_col]
+            elif row[put_col] >= active_min_score:
                 sig_type = "PUT"
-                confirmations = row['Put_Score']
+                confirmations = row[put_col]
                 
             if sig_type:
                 if row.get('Low_Volatility', False):
                     continue
                 entry_price = row['Close']
-                exit_price = next_row['Close']
+                exit_price = exit_row['Close']
                 pattern = row['Pattern_Label']
-                strength = "NORMAL"
+                strength = f"{mode}"
                 
                 mtf_t = row['Trend_15m']
                 if (sig_type == "CALL" and mtf_t == "UP") or (sig_type == "PUT" and mtf_t == "DOWN"):
-                    strength = "STRONG++"
+                    strength = f"{mode}++"
                 elif pattern:
-                    strength = "STRONG"
+                    strength = f"{mode} (Strong)"
                     
                 status = "PENDING"
                 if sig_type == "CALL":
@@ -2512,7 +2535,7 @@ def run_backtest(pair, timeframe):
                         losses += 1
                     else:
                         status = "TIE"
-                        losses += 1
+                        losses += 1 # Tie is loss rule
                         ties += 1
                         
                 backtest_signals.append({
@@ -3350,7 +3373,8 @@ with col_center:
         st.caption("🖥️ Live TradingView Interactive Chart Widget (Timezone: AST/Jeddah)")
             
     with tab_backtest:
-        run_backtest(active_pair, timeframe)
+        backtest_mode = st.selectbox("SELECT STRATEGY MODE FOR BACKTEST", ["SNIPER", "BALANCED", "AGGRESSIVE"], index=0, key="backtest_mode_sb")
+        run_backtest(active_pair, timeframe, mode=backtest_mode)
 
     with tab_diag:
         st.subheader("🩺 System Diagnostics Dashboard (V4.2 Sniper)")
