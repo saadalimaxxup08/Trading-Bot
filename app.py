@@ -2103,9 +2103,44 @@ def check_signals(df, pair=None):
         bb_lower = df.loc[idx, 'BB_Lower']
         bb_upper = df.loc[idx, 'BB_Upper']
         
+        # Real-world market check (Forex / Cryptocurrencies / Commodities)
+        p = str(pair) if pair else ""
+        is_real_market = not (p.startswith("VOL_") or p.startswith("CRASH_") or p.startswith("BOOM_") or p.startswith("1HZ") or p.startswith("R_") or p.startswith("STD"))
+        
+        close_val = df.loc[idx, 'Close']
+        ema200_val = df.loc[idx, 'EMA_200']
+        
+        real_market_call_ok = True
+        real_market_put_ok = True
+        if is_real_market:
+            if close_val < ema200_val:
+                real_market_call_ok = False
+            if close_val > ema200_val:
+                real_market_put_ok = False
+                
+        # Bollinger Band walking filter (prevent entries when price is pushing the band in a momentum run)
+        idx_pos = df.index.get_loc(idx)
+        prev_low_outside = False
+        prev_high_outside = False
+        if idx_pos >= 2:
+            prev_idx_1 = df.index[idx_pos - 1]
+            prev_idx_2 = df.index[idx_pos - 2]
+            
+            # For CALL: did previous candles touch/exceed BB Lower?
+            low_outside_1 = df.loc[prev_idx_1, 'Low'] <= df.loc[prev_idx_1, 'BB_Lower']
+            low_outside_2 = df.loc[prev_idx_2, 'Low'] <= df.loc[prev_idx_2, 'BB_Lower']
+            if low_outside_1 and low_outside_2:
+                prev_low_outside = True
+                
+            # For PUT: did previous candles touch/exceed BB Upper?
+            high_outside_1 = df.loc[prev_idx_1, 'High'] >= df.loc[prev_idx_1, 'BB_Upper']
+            high_outside_2 = df.loc[prev_idx_2, 'High'] >= df.loc[prev_idx_2, 'BB_Upper']
+            if high_outside_1 and high_outside_2:
+                prev_high_outside = True
+
         # --- 1. SNIPER MODE (Strict V4.2) ---
         # CALL
-        if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx]:
+        if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx] and (not prev_low_outside):
             v4_filters_ok = (
                 (ema_slope > 0) and
                 (40 <= rsi_val <= 55) and
@@ -2120,7 +2155,7 @@ def check_signals(df, pair=None):
                 if confirmations >= 5:
                     s_c = 5
         # PUT
-        if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx]:
+        if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx] and (not prev_high_outside):
             v4_filters_ok = (
                 (ema_slope < 0) and
                 (45 <= rsi_val <= 60) and
@@ -2144,7 +2179,9 @@ def check_signals(df, pair=None):
             balanced_filters_ok = (
                 (35 <= rsi_val <= 65) and
                 (not atr_spike) and
-                bb_lower_touch[idx]
+                bb_lower_touch[idx] and
+                real_market_call_ok and
+                (not prev_low_outside)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2160,7 +2197,9 @@ def check_signals(df, pair=None):
                 (ema_slope > 0) and
                 (38 <= rsi_val <= 58) and
                 (not atr_spike) and
-                bb_low_proximity
+                bb_low_proximity and
+                real_market_call_ok and
+                (not prev_low_outside)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2174,7 +2213,9 @@ def check_signals(df, pair=None):
             balanced_filters_ok = (
                 (35 <= rsi_val <= 65) and
                 (not atr_spike) and
-                bb_upper_touch[idx]
+                bb_upper_touch[idx] and
+                real_market_put_ok and
+                (not prev_high_outside)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2190,7 +2231,9 @@ def check_signals(df, pair=None):
                 (ema_slope < 0) and
                 (42 <= rsi_val <= 62) and
                 (not atr_spike) and
-                bb_high_proximity
+                bb_high_proximity and
+                real_market_put_ok and
+                (not prev_high_outside)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2202,10 +2245,11 @@ def check_signals(df, pair=None):
 
         # --- 3. AGGRESSIVE MODE ---
         # CALL
-        if macd_up_cross[idx] or (df.loc[idx, 'Close'] < bb_lower):
+        if (macd_up_cross[idx] or (df.loc[idx, 'Close'] < bb_lower)) and (not prev_low_outside):
             agg_filters_ok = (
                 (30 <= rsi_val <= 70) and
-                (not atr_spike)
+                (not atr_spike) and
+                real_market_call_ok
             )
             if agg_filters_ok:
                 confirmations = 1
@@ -2214,10 +2258,11 @@ def check_signals(df, pair=None):
                 if confirmations >= 2:
                     a_c = 5
         # PUT
-        if macd_down_cross[idx] or (df.loc[idx, 'Close'] > bb_upper):
+        if (macd_down_cross[idx] or (df.loc[idx, 'Close'] > bb_upper)) and (not prev_high_outside):
             agg_filters_ok = (
                 (30 <= rsi_val <= 70) and
-                (not atr_spike)
+                (not atr_spike) and
+                real_market_put_ok
             )
             if agg_filters_ok:
                 confirmations = 1
