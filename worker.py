@@ -1332,11 +1332,13 @@ def process_market_signals(pair, timeframe, df=None):
             if mode == "SNIPER" and timeframe == "5m" and check_mtf_trend_ok(pair, sig_type):
                 strength = "SNIPER (Strong++)"
                 
-            exit_time = closed_candle_time + strat["expiry_delta"]
+            timeframe_delta = datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)
+            entry_time = closed_candle_time + timeframe_delta
+            exit_time = entry_time + strat["expiry_delta"]
             
             new_sig = {
                 "id": f"{int(time.time())}-{pair}-{timeframe}-{mode}",
-                "time": closed_candle_time,
+                "time": entry_time,
                 "pair": pair,
                 "timeframe": timeframe.upper(),
                 "type": sig_type,
@@ -1459,7 +1461,9 @@ def process_market_signals_prefetched(pair, timeframe, df):
             # Expiry selection logic (V4.2 Sniper Update: Strictly 15 Minutes)
             expiry_str = "15 Minutes"
             expiry_delta = delta_t
-            exit_time = closed_candle_time + expiry_delta
+            timeframe_delta = datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)
+            entry_time = closed_candle_time + timeframe_delta
+            exit_time = entry_time + expiry_delta
             
             pattern = closed_candle['Pattern_Label']
             # Skip low-winrate patterns (Doji, Shooting Star, 3 Crows)
@@ -1488,7 +1492,7 @@ def process_market_signals_prefetched(pair, timeframe, df):
 
             new_sig = {
                 "id": str(int(time.time())) + f"-{pair}-{timeframe}",
-                "time": closed_candle_time,
+                "time": entry_time,
                 "pair": pair,
                 "timeframe": timeframe.upper(), # Save uppercase "15M" to database
                 "type": sig_type,

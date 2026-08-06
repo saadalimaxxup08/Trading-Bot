@@ -638,12 +638,14 @@ def local_process_market_signals_prefetched(pair, timeframe, df_pair):
             if mode == "SNIPER" and timeframe == "5m":
                 strength = "SNIPER (Strong++)"
                 
-            exit_time = closed_time + strat["expiry_delta"]
+            timeframe_delta = datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)
+            entry_time = closed_time + timeframe_delta
+            exit_time = entry_time + strat["expiry_delta"]
             diagnostics_str = f"Type: {sig_type} | MACD: {float(closed_candle.get('MACD', 0)):.5f} | BB Lower: {float(closed_candle.get('BB_Lower', 0)):.5f} (Upper: {float(closed_candle.get('BB_Upper', 0)):.5f}) | Volume: {float(closed_candle.get('Volume', 0))} | RSI: {float(closed_candle.get('RSI_14', 0)):.2f}"
             
             new_sig = {
                 "id": sig_id,
-                "time": closed_time.isoformat() if hasattr(closed_time, "isoformat") else str(closed_time),
+                "time": entry_time.isoformat() if hasattr(entry_time, "isoformat") else str(entry_time),
                 "pair": pair,
                 "timeframe": timeframe.upper(),
                 "type": sig_type,
