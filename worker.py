@@ -34,7 +34,7 @@ TELEGRAM_CHAT_ID = clean_env_var(os.environ.get("TELEGRAM_CHAT_ID"))
 # Tickers & Pairs list - Matches app.py
 RADAR_PAIRS = [
     # Forex Majors
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X", "GBPJPY=X",
+    "EURUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURJPY=X", "GBPJPY=X",
     # Forex Minors
     "AUDCAD=X", "AUDCHF=X", "AUDJPY=X", "AUDNZD=X", "EURAUD=X", "EURCAD=X", "EURCHF=X", "GBPAUD=X", "GBPCAD=X", "NZDUSD=X",
     # Cryptocurrencies
@@ -92,12 +92,9 @@ TIER_2_PAIRS = [p for p in RADAR_PAIRS if p not in TIER_1_PAIRS]
 ATR_THRESHOLDS = {
     # Forex Majors
     "EURUSD=X": 0.00005,
-    "GBPUSD=X": 0.00005,
-    "USDJPY=X": 0.01,
     "AUDUSD=X": 0.00005,
     "USDCAD=X": 0.00005,
     "USDCHF=X": 0.00005,
-    "EURGBP=X": 0.00005,
     "EURJPY=X": 0.01,
     "GBPJPY=X": 0.01,
     
@@ -1084,12 +1081,9 @@ def get_scan_rejection_reason(closed_candle, pair, timeframe):
 DERIV_SYMBOL_MAP = {
     # Forex Majors
     "EURUSD=X": "frxEURUSD",
-    "GBPUSD=X": "frxGBPUSD",
-    "USDJPY=X": "frxUSDJPY",
     "AUDUSD=X": "frxAUDUSD",
     "USDCAD=X": "frxUSDCAD",
     "USDCHF=X": "frxUSDCHF",
-    "EURGBP=X": "frxEURGBP",
     "EURJPY=X": "frxEURJPY",
     "GBPJPY=X": "frxGBPJPY",
     

@@ -62,12 +62,9 @@ st.set_page_config(
 DERIV_SYMBOL_MAP = {
     # Forex Majors
     "EURUSD=X": "frxEURUSD",
-    "GBPUSD=X": "frxGBPUSD",
-    "USDJPY=X": "frxUSDJPY",
     "AUDUSD=X": "frxAUDUSD",
     "USDCAD=X": "frxUSDCAD",
     "USDCHF=X": "frxUSDCHF",
-    "EURGBP=X": "frxEURGBP",
     "EURJPY=X": "frxEURJPY",
     "GBPJPY=X": "frxGBPJPY",
     
@@ -1644,7 +1641,7 @@ else:
 # Tickers & Pairs list - Expanded to include all major currency pairs, cryptos, and commodities
 RADAR_PAIRS = [
     # Forex Majors
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURGBP=X", "EURJPY=X", "GBPJPY=X",
+    "EURUSD=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "EURJPY=X", "GBPJPY=X",
     # Forex Minors
     "AUDCAD=X", "AUDCHF=X", "AUDJPY=X", "AUDNZD=X", "EURAUD=X", "EURCAD=X", "EURCHF=X", "GBPAUD=X", "GBPCAD=X", "NZDUSD=X",
     # Cryptocurrencies
@@ -1702,12 +1699,9 @@ TIER_2_PAIRS = [p for p in RADAR_PAIRS if p not in TIER_1_PAIRS]
 ATR_THRESHOLDS = {
     # Forex Majors
     "EURUSD=X": 0.00005,
-    "GBPUSD=X": 0.00005,
-    "USDJPY=X": 0.01,
     "AUDUSD=X": 0.00005,
     "USDCAD=X": 0.00005,
     "USDCHF=X": 0.00005,
-    "EURGBP=X": 0.00005,
     "EURJPY=X": 0.01,
     "GBPJPY=X": 0.01,
     
@@ -2543,11 +2537,8 @@ active_pair = st.session_state.selected_pair
 # Ticker selection dropdown in the sidebar
 readable_names = {
     "EURUSD=X": "EUR/USD",
-    "GBPUSD=X": "GBP/USD",
-    "USDJPY=X": "USD/JPY",
     "AUDUSD=X": "AUD/USD",
     "NZDUSD=X": "NZD/USD",
-    "EURGBP=X": "EUR/GBP",
     "GBPJPY=X": "GBP/JPY",
     "EURJPY=X": "EUR/JPY",
     "GC=F": "GOLD (GC=F)",
@@ -3260,12 +3251,9 @@ with col_center:
         import streamlit.components.v1 as components
         tv_mapping = {
             "EURUSD=X": "FX:EURUSD",
-            "GBPUSD=X": "FX:GBPUSD",
-            "USDJPY=X": "FX:USDJPY",
             "AUDUSD=X": "FX:AUDUSD",
             "USDCAD=X": "FX:USDCAD",
             "USDCHF=X": "FX:USDCHF",
-            "EURGBP=X": "FX:EURGBP",
             "GBPJPY=X": "FX:GBPJPY",
             "BTC-USD": "BINANCE:BTCUSDT",
             "ETH-USD": "BINANCE:ETHUSDT",
