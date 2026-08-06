@@ -736,8 +736,17 @@ def local_resolve_pending_signals():
                     actual_exit_time = df_utc_index[match_idx]
                 else:
                     closest_idx = df_utc_index.get_indexer([exit_time_utc], method='nearest')[0]
+                    closest_time = df_utc_index[closest_idx]
+                    time_diff = abs((closest_time - exit_time_utc).total_seconds())
+                    
+                    # If the closest candle is more than 1 timeframe interval away, the feed is lagging. Skip resolution.
+                    max_allowed_diff = delta_t.total_seconds()
+                    if time_diff > max_allowed_diff:
+                        print(f"[RESOLVER LAG] {pair} exit candle {exit_time_utc} not in feed yet (closest is {closest_time}). Skipping for now.")
+                        continue
+                        
                     exit_price = float(df['Close'].iloc[closest_idx])
-                    actual_exit_time = df_utc_index[closest_idx]
+                    actual_exit_time = closest_time
                     
                 entry_price = float(sig["entry_price"])
                 sig_type = sig["type"]
