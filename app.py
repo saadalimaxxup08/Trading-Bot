@@ -168,10 +168,7 @@ def download_deriv_candles(pair, timeframe, count=250):
 def download_market_data(pair, timeframe, period="2d", count=250):
     source = settings_manager.get_active_data_source()
     if source == "Deriv WebSocket":
-        df = download_deriv_candles(pair, timeframe, count=count)
-        if not df.empty:
-            return df
-        print(f"[Data Loader]: Deriv fetch failed/empty for {pair}, falling back to yfinance.")
+        return download_deriv_candles(pair, timeframe, count=count)
         
     try:
         df = yf.download(pair, period=period, interval=timeframe, progress=False, threads=False)
@@ -193,7 +190,7 @@ def download_market_batch(pairs, timeframe, period="5d", count=250):
         if dfs:
             df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
             return df_batch
-        print("[Data Loader]: Deriv batch fetch failed/empty, falling back to yfinance.")
+        return pd.DataFrame()
         
     try:
         df_batch = yf.download(pairs, period=period, interval=timeframe, group_by="ticker", progress=False, threads=True)
