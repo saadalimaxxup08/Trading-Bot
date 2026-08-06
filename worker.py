@@ -235,7 +235,7 @@ def send_daily_summary():
         start_of_day_ry = tz_ry.localize(datetime.datetime(now_ry.year, now_ry.month, now_ry.day, 0, 0, 0))
         start_of_day_utc = start_of_day_ry.astimezone(pytz.utc).isoformat()
         
-        res = supabase_client.table("signals").select("time,status,stake,payout,pair,type,timeframe,session_type").gte("time", start_of_day_utc).order("time", desc=True).execute()
+        res = supabase_client.table("signals").select("time,status,pair,type,timeframe,session_type").gte("time", start_of_day_utc).order("time", desc=True).execute()
         signals = res.data if res.data else []
         
         date_str = now_ry.strftime("%d/%m/%Y")
@@ -286,6 +286,19 @@ def send_daily_summary():
         msg += f"<b>--- OVERALL TOTAL ---</b>\n"
         msg += f"Total Signals: {overall_total} | Overall Winrate: {overall_winrate:.1f}% | Net Profit: ${overall_profit:+.2f}\n\n"
         
+        msg += f"<b>--- 🏆 STRATEGY ACCURACY ---</b>\n"
+        for mode in ["SNIPER", "BALANCED", "AGGRESSIVE"]:
+            mode_sigs = [s for s in signals if mode in str(s.get("strength", ""))]
+            if mode_sigs:
+                m_wins = sum(1 for s in mode_sigs if s["status"] == "WIN")
+                m_losses = sum(1 for s in mode_sigs if s["status"] in ["LOSS", "TIE"])
+                m_total = m_wins + m_losses
+                m_wr = (m_wins / m_total * 100) if m_total > 0 else 0.0
+                msg += f"• <b>{mode}:</b> {m_wins}W - {m_losses}L (Win Rate: <b>{m_wr:.1f}%</b>)\n"
+            else:
+                msg += f"• <b>{mode}:</b> No trades\n"
+        msg += "\n"
+        
         # Append today's trades list
         msg += f"<b>--- 📋 TODAY'S SIGNALS LIST ---</b>\n"
         if signals:
@@ -310,7 +323,7 @@ def send_daily_summary():
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
                     tf_val = sig.get("timeframe", "15M").upper()
-                    expiry_val = "5m Exp" if tf_val == "5M" else "15m Exp"
+                    expiry_val = "15m Exp" if (tf_val == "15M" or "SNIPER" in strength_val or "STRONG" in strength_val) else "5m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No in-session trades triggered.</i>\n"
@@ -336,7 +349,7 @@ def send_daily_summary():
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
                     tf_val = sig.get("timeframe", "15M").upper()
-                    expiry_val = "5m Exp" if tf_val == "5M" else "15m Exp"
+                    expiry_val = "15m Exp" if (tf_val == "15M" or "SNIPER" in strength_val or "STRONG" in strength_val) else "5m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No off-session trades triggered.</i>\n"
@@ -363,6 +376,53 @@ def calculate_atr(df, period=14):
     
     df['ATR_MA'] = df['ATR'].rolling(window=20).mean()
     df['Low_Volatility'] = df['ATR'] < (df['ATR_MA'] * 0.60)
+    return df
+
+def calculate_adx(df, period=14):
+    if len(df) < period * 2:
+        df['ADX'] = 0.0
+        df['Plus_DI'] = 0.0
+        df['Minus_DI'] = 0.0
+        return df
+    try:
+        high = df['High']
+        low = df['Low']
+        close_prev = df['Close'].shift(1)
+        
+        tr1 = high - low
+        tr2 = (high - close_prev).abs()
+        tr3 = (low - close_prev).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        
+        up = high.diff()
+        down = (-low.diff())
+        
+        plus_dm = np.where((up > down) & (up > 0), up, 0.0)
+        minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+        
+        tr_smoothed = pd.Series(tr).ewm(alpha=1/period, adjust=False).mean()
+        plus_dm_smoothed = pd.Series(plus_dm, index=df.index).ewm(alpha=1/period, adjust=False).mean()
+        minus_dm_smoothed = pd.Series(minus_dm, index=df.index).ewm(alpha=1/period, adjust=False).mean()
+        
+        tr_smoothed = tr_smoothed.replace(0, 0.00001)
+        
+        plus_di = 100 * (plus_dm_smoothed / tr_smoothed)
+        minus_di = 100 * (minus_dm_smoothed / tr_smoothed)
+        
+        di_diff = (plus_di - minus_di).abs()
+        di_sum = plus_di + minus_di
+        di_sum = di_sum.replace(0, 0.00001)
+        dx = 100 * (di_diff / di_sum)
+        
+        adx = dx.ewm(alpha=1/period, adjust=False).mean()
+        df['ADX'] = adx
+        df['Plus_DI'] = plus_di
+        df['Minus_DI'] = minus_di
+    except Exception as adx_err:
+        print(f"[ADX Calc Error]: {adx_err}")
+        df['ADX'] = 0.0
+        df['Plus_DI'] = 0.0
+        df['Minus_DI'] = 0.0
     return df
 
 def detect_patterns(df):
@@ -466,6 +526,7 @@ def calculate_indicators(df):
     
     df = calculate_atr(df)
     df = detect_patterns(df)
+    df = calculate_adx(df)
     
     df['EMA_200_Slope'] = df['EMA_200'].diff(periods=1)
     df['Swing_Low_20'] = df['Low'].rolling(window=20).min()
@@ -479,6 +540,12 @@ def check_signals(df, pair=None):
     if len(df) < 50:
         df['Call_Score'] = 0
         df['Put_Score'] = 0
+        df['Sniper_Call_Score'] = 0
+        df['Sniper_Put_Score'] = 0
+        df['Balanced_Call_Score'] = 0
+        df['Balanced_Put_Score'] = 0
+        df['Aggressive_Call_Score'] = 0
+        df['Aggressive_Put_Score'] = 0
         return df
 
     macd = df['MACD']
@@ -529,19 +596,19 @@ def check_signals(df, pair=None):
     rsi_room_call = rsi <= 55
     rsi_room_put = rsi >= 45
     
-    # 6. Calculate Scores (Requires at least one primary trigger + safety + confirmations + V4 Sniper Filters)
-    call_scores = []
-    put_scores = []
+    # 6. Calculate Scores across all 3 strategy modes
+    sniper_calls, sniper_puts = [], []
+    balanced_calls, balanced_puts = [], []
+    aggressive_calls, aggressive_puts = [], []
     
     for idx in df.index:
-        c_score = 0
-        p_score = 0
+        s_c, s_p = 0, 0
+        b_c, b_p = 0, 0
+        a_c, a_p = 0, 0
         
-        # Pips multiplier for Pivot filter
         pips_mult = get_pip_multiplier(pair)
         ten_pips = 10 * pips_mult
         
-        # V4 Sniper Filters inputs
         ema_slope = df.loc[idx, 'EMA_200_Slope'] if 'EMA_200_Slope' in df.columns else 0.0
         rsi_val = df.loc[idx, 'RSI_14']
         atr_spike = df.loc[idx, 'ATR_Spike'] if 'ATR_Spike' in df.columns else False
@@ -550,57 +617,147 @@ def check_signals(df, pair=None):
         bb_lower = df.loc[idx, 'BB_Lower']
         bb_upper = df.loc[idx, 'BB_Upper']
         
-        # CALL SCORE (Strict V4.2 Sniper Logic)
+        # --- 1. SNIPER MODE (Strict V4.2) ---
+        # CALL
         if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx]:
-            # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope > 0) and
                 (40 <= rsi_val <= 55) and
                 (not atr_spike) and
                 (abs(bb_lower - swing_low) <= ten_pips)
             )
-            
             if v4_filters_ok:
-                confirmations = 2  # MACD and Bollinger Band touches are both true
-                if ema_trend_call[idx]:
-                    confirmations += 1
-                if vol_increasing[idx]:
-                    confirmations += 1
-                if rsi_room_call[idx]:
-                    confirmations += 1
-                
-                # Must meet all confirmations to reach exactly Score 5
+                confirmations = 2
+                if ema_trend_call[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if rsi_room_call[idx]: confirmations += 1
                 if confirmations >= 5:
-                    c_score = 5
-                
-        # PUT SCORE (Strict V4.2 Sniper Logic)
+                    s_c = 5
+        # PUT
         if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx]:
-            # Enforce 4 V4 Sniper Filters
             v4_filters_ok = (
                 (ema_slope < 0) and
                 (45 <= rsi_val <= 60) and
                 (not atr_spike) and
                 (abs(bb_upper - swing_high) <= ten_pips)
             )
-            
             if v4_filters_ok:
-                confirmations = 2  # MACD and Bollinger Band touches are both true
-                if ema_trend_put[idx]:
-                    confirmations += 1
-                if vol_increasing[idx]:
-                    confirmations += 1
-                if rsi_room_put[idx]:
-                    confirmations += 1
-                
-                # Must meet all confirmations to reach exactly Score 5
+                confirmations = 2
+                if ema_trend_put[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if rsi_room_put[idx]: confirmations += 1
                 if confirmations >= 5:
-                    p_score = 5
-                    
-        call_scores.append(c_score)
-        put_scores.append(p_score)
+                    s_p = 5
+
+        # --- 2. BALANCED MODE (V5 Adaptive - ADX Regime) ---
+        adx_val = df.loc[idx, 'ADX'] if 'ADX' in df.columns else 0.0
+        is_trending = adx_val >= 22
         
-    df['Call_Score'] = call_scores
-    df['Put_Score'] = put_scores
+        # CALL
+        if not is_trending: # Sideways Market
+            balanced_filters_ok = (
+                (35 <= rsi_val <= 65) and
+                (not atr_spike) and
+                bb_lower_touch[idx]
+            )
+            if balanced_filters_ok:
+                confirmations = 2
+                if ema_trend_call[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if rsi_room_call[idx]: confirmations += 1
+                if confirmations >= 4:
+                    b_c = 5
+        else: # Trending Market
+            atr_val = df.loc[idx, 'ATR'] if 'ATR' in df.columns else 0.0001
+            bb_low_proximity = (df.loc[idx, 'Close'] - bb_lower) <= (atr_val * 1.5)
+            balanced_filters_ok = (
+                (ema_slope > 0) and
+                (38 <= rsi_val <= 58) and
+                (not atr_spike) and
+                bb_low_proximity
+            )
+            if balanced_filters_ok:
+                confirmations = 2
+                if ema_trend_call[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if rsi_room_call[idx]: confirmations += 1
+                if confirmations >= 4:
+                    b_c = 5
+        # PUT
+        if not is_trending: # Sideways Market
+            balanced_filters_ok = (
+                (35 <= rsi_val <= 65) and
+                (not atr_spike) and
+                bb_upper_touch[idx]
+            )
+            if balanced_filters_ok:
+                confirmations = 2
+                if ema_trend_put[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if rsi_room_put[idx]: confirmations += 1
+                if confirmations >= 4:
+                    b_p = 5
+        else: # Trending Market
+            atr_val = df.loc[idx, 'ATR'] if 'ATR' in df.columns else 0.0001
+            bb_high_proximity = (bb_upper - df.loc[idx, 'Close']) <= (atr_val * 1.5)
+            balanced_filters_ok = (
+                (ema_slope < 0) and
+                (42 <= rsi_val <= 62) and
+                (not atr_spike) and
+                bb_high_proximity
+            )
+            if balanced_filters_ok:
+                confirmations = 2
+                if ema_trend_put[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if rsi_room_put[idx]: confirmations += 1
+                if confirmations >= 4:
+                    b_p = 5
+
+        # --- 3. AGGRESSIVE MODE ---
+        # CALL
+        if macd_up_cross[idx] or (df.loc[idx, 'Close'] < bb_lower):
+            agg_filters_ok = (
+                (30 <= rsi_val <= 70) and
+                (not atr_spike)
+            )
+            if agg_filters_ok:
+                confirmations = 1
+                if ema_trend_call[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if confirmations >= 2:
+                    a_c = 5
+        # PUT
+        if macd_down_cross[idx] or (df.loc[idx, 'Close'] > bb_upper):
+            agg_filters_ok = (
+                (30 <= rsi_val <= 70) and
+                (not atr_spike)
+            )
+            if agg_filters_ok:
+                confirmations = 1
+                if ema_trend_put[idx]: confirmations += 1
+                if vol_increasing[idx]: confirmations += 1
+                if confirmations >= 2:
+                    a_p = 5
+                    
+        sniper_calls.append(s_c)
+        sniper_puts.append(s_p)
+        balanced_calls.append(b_c)
+        balanced_puts.append(b_p)
+        aggressive_calls.append(a_c)
+        aggressive_puts.append(a_p)
+        
+    df['Sniper_Call_Score'] = sniper_calls
+    df['Sniper_Put_Score'] = sniper_puts
+    df['Balanced_Call_Score'] = balanced_calls
+    df['Balanced_Put_Score'] = balanced_puts
+    df['Aggressive_Call_Score'] = aggressive_calls
+    df['Aggressive_Put_Score'] = aggressive_puts
+    
+    # Backward compatibility
+    df['Call_Score'] = sniper_calls
+    df['Put_Score'] = sniper_puts
+    return df
     return df
 
 # ----------------- DB OPERATIONS -----------------
@@ -608,7 +765,7 @@ def fetch_pending_signals():
     if supabase_client is None:
         return []
     try:
-        res = supabase_client.table("signals").select("id,pair,timeframe,type,entry_price,time,stake").eq("status", "PENDING").execute()
+        res = supabase_client.table("signals").select("id,pair,timeframe,type,entry_price,time").eq("status", "PENDING").execute()
         return res.data if res.data else []
     except Exception as e:
         print(f"Failed to fetch pending signals: {e}")
@@ -1114,87 +1271,83 @@ def process_market_signals(pair, timeframe, df=None):
         session_type = get_session_type(closed_candle_time)
         session_label = "🟢 IN-SESSION" if session_type == "IN-SESSION" else "🟡 OFF-SESSION"
         
-        call_score = int(closed_candle.get('Call_Score', 0))
-        put_score = int(closed_candle.get('Put_Score', 0))
-        max_score = max(call_score, put_score)
+        # Calculate maximum score across all strategies for diagnostics
+        max_any_score = max(
+            int(closed_candle.get('Sniper_Call_Score', 0)),
+            int(closed_candle.get('Sniper_Put_Score', 0)),
+            int(closed_candle.get('Balanced_Call_Score', 0)),
+            int(closed_candle.get('Balanced_Put_Score', 0)),
+            int(closed_candle.get('Aggressive_Call_Score', 0)),
+            int(closed_candle.get('Aggressive_Put_Score', 0))
+        )
+        LAST_SCAN_SCORES[pair] = max_any_score
         
-        # Save max score to global dict for debug heartbeat reporting
-        LAST_SCAN_SCORES[pair] = max_score
-        
-        # Determine rejected reason
         volatility_low = closed_candle.get('Low_Volatility', False)
         if volatility_low:
-            reason = "LOW_VOLATILITY"
-        else:
-            reason = get_scan_rejection_reason(closed_candle, pair, timeframe)
-            
-        print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {ast_time_str} - Session: {session_label} - Score: {max_score}/5 - REASON BLOCKED: {reason}")
-
-        # Prevent double-processing the same candle
-        key = (pair, timeframe)
-        if last_processed_candles.get(key) == closed_candle_time:
+            print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {ast_time_str} - Session: {session_label} - Score: {max_any_score}/5 - REASON BLOCKED: LOW_VOLATILITY")
             return
-        
-        last_processed_candles[key] = closed_candle_time
-        
-        # Volatility check
-        volatility_low = closed_candle['Low_Volatility']
-        if volatility_low:
-            return # Skip signal checks in low volatility environment
             
-        sig_type = None
-        confirmations = 0
-        
-        # Determine score threshold (V4.2 Sniper: Strictly 5/5 confirmations)
-        min_score = 5
-        
-        if closed_candle['Call_Score'] >= min_score:
-            sig_type = "CALL"
-            confirmations = closed_candle['Call_Score']
-        elif closed_candle['Put_Score'] >= min_score:
-            sig_type = "PUT"
-            confirmations = closed_candle['Put_Score']
-            
-        if sig_type:
-            # Enforce MTF Hard Rule for 5m signals (redundant for 15m, but kept for logic safety)
-            if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
-                return
-                
-            # Enforce V4 Sniper Filters
-            if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
-                return
-                
-            # Expiry selection logic (V4.2 Sniper Update: Strictly 15 Minutes)
-            expiry_str = "15 Minutes"
-            expiry_delta = delta_t
-            exit_time = closed_candle_time + expiry_delta
-            
-            pattern = closed_candle['Pattern_Label']
-            # Skip low-winrate patterns (Doji, Shooting Star, 3 Crows)
-            if pattern and any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
-                return False
-                
-            strength = "NORMAL"
-            if pattern:
-                strength = "STRONG"
-                
-            # Strict Session Block disabled to allow off-session signals
-            pass
-                
-            is_marubozu = (
-                'Pattern_Marubozu' in closed_candle and 
-                closed_candle['Pattern_Marubozu'] and 
-                (
-                    (sig_type == "CALL" and closed_candle['Close'] > closed_candle['Open']) or
-                    (sig_type == "PUT" and closed_candle['Close'] < closed_candle['Open'])
-                )
-            )
+        reason = get_scan_rejection_reason(closed_candle, pair, timeframe)
+        print(f"[SCAN] {pair.replace('=X', '')} {timeframe.upper()} - Time: {ast_time_str} - Session: {session_label} - Max Score: {max_any_score}/5 - REASON BLOCKED (If Sniper): {reason}")
 
+        # Run Sniper, Balanced, and Aggressive strategies in parallel
+        strategies = [
+            {"mode": "SNIPER", "call_col": "Sniper_Call_Score", "put_col": "Sniper_Put_Score", "min_score": 5, "expiry": "15 Minutes", "expiry_delta": delta_t * 3},
+            {"mode": "BALANCED", "call_col": "Balanced_Call_Score", "put_col": "Balanced_Put_Score", "min_score": 5, "expiry": "5 Minutes" if timeframe == "5m" else "15 Minutes", "expiry_delta": delta_t},
+            {"mode": "AGGRESSIVE", "call_col": "Aggressive_Call_Score", "put_col": "Aggressive_Put_Score", "min_score": 5, "expiry": "5 Minutes" if timeframe == "5m" else "15 Minutes", "expiry_delta": delta_t}
+        ]
+
+        for strat in strategies:
+            mode = strat["mode"]
+            call_score = int(closed_candle.get(strat["call_col"], 0))
+            put_score = int(closed_candle.get(strat["put_col"], 0))
+            
+            sig_type = None
+            confirmations = 0
+            if call_score >= strat["min_score"]:
+                sig_type = "CALL"
+                confirmations = call_score
+            elif put_score >= strat["min_score"]:
+                sig_type = "PUT"
+                confirmations = put_score
+                
+            if not sig_type:
+                continue
+                
+            # Prevent double-processing this specific strategy mode on the same candle
+            key = (pair, timeframe, mode)
+            if last_processed_candles.get(key) == closed_candle_time:
+                continue
+                
+            last_processed_candles[key] = closed_candle_time
+            
+            # Pattern validation (Block Doji, Shooting Star, 3 Crows for Sniper & Balanced)
+            pattern = closed_candle.get('Pattern_Label', '')
+            if mode in ["SNIPER", "BALANCED"] and pattern:
+                if any(bad_pat in pattern for bad_pat in ["Doji", "Shooting Star", "3 Crows"]):
+                    print(f"[SCAN] Blocked {mode} signal on {pair} due to pattern: {pattern}")
+                    continue
+            
+            # Additional V4 checks strictly for Sniper
+            if mode == "SNIPER":
+                if timeframe == "5m" and not check_mtf_trend_ok(pair, sig_type):
+                    continue
+                if not check_v4_sniper_filters_ok(closed_candle, pair, sig_type):
+                    continue
+            
+            strength = f"{mode}"
+            if pattern:
+                strength = f"{mode} (Strong)"
+            if mode == "SNIPER" and timeframe == "5m" and check_mtf_trend_ok(pair, sig_type):
+                strength = "SNIPER (Strong++)"
+                
+            exit_time = closed_candle_time + strat["expiry_delta"]
+            
             new_sig = {
-                "id": str(int(time.time())) + f"-{pair}-{timeframe}",
+                "id": f"{int(time.time())}-{pair}-{timeframe}-{mode}",
                 "time": closed_candle_time,
                 "pair": pair,
-                "timeframe": timeframe.upper(), # Save uppercase "15M" to database
+                "timeframe": timeframe.upper(),
                 "type": sig_type,
                 "entry_price": float(closed_candle['Close']),
                 "exit_time": exit_time,
@@ -1209,17 +1362,15 @@ def process_market_signals(pair, timeframe, df=None):
             
             success = save_signal_to_db(new_sig)
             if success:
-                save_trade_log_to_db(new_sig, closed_candle, session_type, is_marubozu)
-                # Convert closed_candle_time to Riyadh AST and UTC
-                ast_tz = pytz.timezone("Asia/Riyadh")
+                save_trade_log_to_db(new_sig, closed_candle, session_type, mode == "SNIPER")
+                
+                # Format timestamps
                 if closed_candle_time.tzinfo is not None:
                     closed_candle_time_ast = closed_candle_time.astimezone(ast_tz)
                 else:
                     closed_candle_time_ast = pytz.utc.localize(closed_candle_time).astimezone(ast_tz)
-                
                 closed_candle_time_utc = closed_candle_time_ast.astimezone(pytz.utc)
                 
-                # Trade Entry Time is when the signal candle ends
                 trade_entry_time_ast = closed_candle_time_ast + delta_t
                 trade_entry_time_utc = closed_candle_time_utc + delta_t
                 
@@ -1227,19 +1378,23 @@ def process_market_signals(pair, timeframe, df=None):
                 trade_entry_utc_str = trade_entry_time_utc.strftime("%I:%M %p UTC")
                 trade_entry_display = f"{trade_entry_ast_str} ({trade_entry_utc_str})"
                 
-                print(f"[SIGNAL] NEW Central Signal: {pair} [{timeframe}] {sig_type} at {trade_entry_display}")
+                session_header = "🟢 ON-SESSION TRADE" if session_type == "IN-SESSION" else "☕ OFF-SESSION TRADE"
                 
-                # Format and send Telegram notification
-                tg_text = f"✅ <b>FINAL SIGNAL</b>\n\n" \
+                print(f"[SIGNAL] NEW {mode} Signal: {pair} [{timeframe.upper()}] {sig_type} at {trade_entry_display}")
+                
+                tg_text = f"{session_header}\n" \
+                          f"🏆 <b>MODE: {mode}</b>\n\n" \
                           f"<b>Pair:</b> {pair.replace('=X', '')}\n" \
                           f"<b>Direction:</b> {'🟢 CALL' if sig_type == 'CALL' else '🔴 PUT'}\n" \
-                          f"<b>Session:</b> {session_label}\n" \
+                          f"<b>Timeframe:</b> {timeframe.upper()}\n" \
                           f"<b>Entry Time:</b> {trade_entry_display}\n" \
-                          f"<b>Expiry:</b> {expiry_str}\n" \
-                          f"<b>Reason:</b> All {confirmations} Confirmations + V4 Filters Passed\n" \
-                          f"<b>Risk:</b> Low"
+                          f"<b>Expiry:</b> {strat['expiry']}\n" \
+                          f"<b>Reason:</b> {mode} strategy criteria met\n" \
+                          f"<b>Risk:</b> {'Low' if mode == 'SNIPER' else ('Medium' if mode == 'BALANCED' else 'High')}"
                 send_telegram_alert(tg_text)
-                return True
+        return True
+    except Exception as e:
+        print(f"Error processing market signals for {pair} [{timeframe}]: {e}")
         return False
     except Exception as e:
         print(f"Error processing market signals for {pair} [{timeframe}]: {e}")
@@ -1514,11 +1669,25 @@ def send_hourly_summary():
                         status_emoji = "⚪ TIE"
                     conf_val = sig.get("confirmations", "N/A")
                     strength_val = sig.get("strength", "NORMAL")
-                    expiry_val = "15m Exp" if strength_val == "STRONG" else "5m Exp"
+                    expiry_val = "15m Exp" if ("SNIPER" in strength_val or "STRONG" in strength_val) else "5m Exp"
                     msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
             else:
                 msg += "<i>No trades triggered.</i>\n"
             msg += "\n"
+            
+        # Strategy breakdown
+        msg += "📊 <b>STRATEGY PERFORMANCE BREAKDOWN:</b>\n"
+        for mode in ["SNIPER", "BALANCED", "AGGRESSIVE"]:
+            mode_sigs = [s for s in signals if mode in str(s.get("strength", ""))]
+            if mode_sigs:
+                m_wins = sum(1 for s in mode_sigs if s["status"] == "WIN")
+                m_losses = sum(1 for s in mode_sigs if s["status"] in ["LOSS", "TIE"])
+                m_total = m_wins + m_losses
+                m_wr = (m_wins / m_total * 100) if m_total > 0 else 0.0
+                msg += f"• <b>{mode}:</b> {m_wins}W - {m_losses}L (Win Rate: <b>{m_wr:.1f}%</b>)\n"
+            else:
+                msg += f"• <b>{mode}:</b> No trades\n"
+        msg += "\n"
             
         send_telegram_alert(msg)
         print(f"[SUMMARY] Hourly summary successfully sent for {period_str} AST.")
@@ -1625,9 +1794,16 @@ def resolve_pending_signals():
                         new_balance = update_account_balance(balance_change)
                         
                         # Format and send Telegram Completed Signal alert
+                        sig_time_utc = pd.to_datetime(sig["time"])
+                        if sig_time_utc.tzinfo is None:
+                            sig_time_utc = pytz.utc.localize(sig_time_utc)
+                        sig_time_ast = sig_time_utc.astimezone(pytz.timezone('Asia/Riyadh'))
+
                         res_msg = f"🏁 <b>TRADE COMPLETED</b>\n\n" \
                                   f"<b>Pair:</b> {sig['pair'].replace('=X', '')}\n" \
+                                  f"<b>Strategy Mode:</b> {sig.get('strength', 'SNIPER')}\n" \
                                   f"<b>Direction:</b> {sig['type']}\n" \
+                                  f"<b>Entry Time:</b> {sig_time_ast.strftime('%I:%M %p AST')}\n" \
                                   f"<b>Result:</b> {res_label}\n" \
                                   f"<b>Profit:</b> {profit_label}\n" \
                                   f"<b>Balance:</b> ${new_balance:.2f}"
@@ -1688,6 +1864,8 @@ if __name__ == "__main__":
     # Warm up: run once immediately
     resolve_pending_signals()
     
+    last_heartbeat_time = 0
+    
     while True:
         try:
             # Check Active Host Setting to prevent duplicate alerts
@@ -1699,11 +1877,14 @@ if __name__ == "__main__":
                 time.sleep(15)
                 continue
                 
-            # Update Host Heartbeat to prove in real-time that the bot is running
-            try:
-                settings_manager.set_active_host(local_host)
-            except Exception as hb_err:
-                print(f"[Heartbeat Update Error]: {hb_err}")
+            # Update Host Heartbeat to prove in real-time that the bot is running (throttled to every 60s)
+            now_time = time.time()
+            if now_time - last_heartbeat_time >= 60:
+                try:
+                    settings_manager.set_active_host(local_host)
+                    last_heartbeat_time = now_time
+                except Exception as hb_err:
+                    print(f"[Heartbeat Update Error]: {hb_err}")
                 
             loop_start = time.time()
             
