@@ -1240,16 +1240,85 @@ def download_market_data(pair, timeframe, period="2d", count=250):
 def download_market_batch(pairs, timeframe, period="5d", count=250):
     source = settings_manager.get_active_data_source()
     if source == "Deriv WebSocket":
-        dfs = {}
-        for pair in pairs:
-            df = download_deriv_candles(pair, timeframe, count=count)
-            if not df.empty:
-                dfs[pair] = df
-        if dfs:
-            df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
-            return df_batch
-        return pd.DataFrame()
-        
+        try:
+            # Map pair names to deriv symbols
+            symbol_to_pair = {}
+            valid_symbols = []
+            for p in pairs:
+                ds = DERIV_SYMBOL_MAP.get(p)
+                if ds:
+                    symbol_to_pair[ds] = p
+                    valid_symbols.append(ds)
+                    
+            if not valid_symbols:
+                return pd.DataFrame()
+                
+            granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else 60)
+            url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+            
+            # Run async batch fetch synchronously
+            async def _fetch_batch_async():
+                dfs = {}
+                async with websockets.connect(url, ping_interval=None) as ws:
+                    for ds in valid_symbols:
+                        req = {
+                            "ticks_history": ds,
+                            "adjust_start_time": 1,
+                            "count": count,
+                            "end": "latest",
+                            "style": "candles",
+                            "granularity": granularity
+                        }
+                        await ws.send(json.dumps(req))
+                        
+                    for _ in range(len(valid_symbols)):
+                        try:
+                            resp = await ws.recv()
+                            data = json.loads(resp)
+                            echo = data.get("echo_req", {})
+                            ds_resp = echo.get("ticks_history")
+                            pair_name = symbol_to_pair.get(ds_resp)
+                            
+                            if not pair_name or "error" in data:
+                                continue
+                                
+                            candles = data.get("candles", [])
+                            if not candles:
+                                continue
+                                
+                            records = []
+                            for c in candles:
+                                records.append({
+                                    "Time": pd.to_datetime(c["epoch"], unit="s", utc=True),
+                                    "Open": float(c["open"]),
+                                    "High": float(c["high"]),
+                                    "Low": float(c["low"]),
+                                    "Close": float(c["close"]),
+                                    "Volume": 0.0
+                                })
+                            df = pd.DataFrame(records)
+                            df.set_index("Time", inplace=True)
+                            dfs[pair_name] = df
+                        except Exception as ext_err:
+                            print(f"[Deriv Batch Parse Error]: {ext_err}")
+                return dfs
+                
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                dfs = loop.run_until_complete(_fetch_batch_async())
+            finally:
+                loop.close()
+                
+            if dfs:
+                df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
+                return df_batch
+            return pd.DataFrame()
+            
+        except Exception as e:
+            print(f"[Deriv Batch Download Error]: {e}")
+            return pd.DataFrame()
+            
     try:
         df_batch = yf.download(pairs, period=period, interval=timeframe, group_by="ticker", progress=False, threads=True)
         return df_batch
@@ -1830,7 +1899,34 @@ def resolve_pending_signals():
         
     print(f"Found {len(pending_signals)} PENDING signals in database to check...")
     
-    # Group pending signals by pair/timeframe to minimize yfinance downloads
+    # 1. Collect all unique pairs by timeframe to run batch downloads
+    tf_to_pairs = {}
+    for sig in pending_signals:
+        tf = sig["timeframe"].lower()
+        if tf not in tf_to_pairs:
+            tf_to_pairs[tf] = set()
+        tf_to_pairs[tf].add(sig["pair"])
+        
+    # 2. Perform parallel batch downloads
+    dfs_by_tf_pair = {}
+    for tf, pairs_set in tf_to_pairs.items():
+        lookback = "2d" if tf == "5m" else ("5d" if tf == "15m" else "1d")
+        df_batch = download_market_batch(list(pairs_set), tf, period=lookback)
+        
+        for pair in pairs_set:
+            df_pair = pd.DataFrame()
+            if not df_batch.empty:
+                try:
+                    if isinstance(df_batch.columns, pd.MultiIndex):
+                        if pair in df_batch.columns.levels[0]:
+                            df_pair = df_batch[pair].dropna()
+                    elif pair in df_batch:
+                        df_pair = df_batch[pair].dropna()
+                except Exception:
+                    pass
+            dfs_by_tf_pair[(tf, pair)] = df_pair
+            
+    # Group pending signals by pair/timeframe to process
     grouped = {}
     for sig in pending_signals:
         key = (sig["pair"], sig["timeframe"])
@@ -1840,10 +1936,8 @@ def resolve_pending_signals():
         
     for (pair, timeframe), sigs in grouped.items():
         try:
-            # Download latest data to verify exit candle prices
             tf_lower = timeframe.lower()
-            lookback = "2d" if tf_lower == "5m" else ("5d" if tf_lower == "15m" else "1d")
-            df = download_market_data(pair, tf_lower, period=lookback)
+            df = dfs_by_tf_pair.get((tf_lower, pair), pd.DataFrame())
             if df.empty:
                 continue
                 

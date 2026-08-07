@@ -182,16 +182,85 @@ def download_market_data(pair, timeframe, period="2d", count=250):
 def download_market_batch(pairs, timeframe, period="5d", count=250):
     source = settings_manager.get_active_data_source()
     if source == "Deriv WebSocket":
-        dfs = {}
-        for pair in pairs:
-            df = download_deriv_candles(pair, timeframe, count=count)
-            if not df.empty:
-                dfs[pair] = df
-        if dfs:
-            df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
-            return df_batch
-        return pd.DataFrame()
-        
+        try:
+            # Map pair names to deriv symbols
+            symbol_to_pair = {}
+            valid_symbols = []
+            for p in pairs:
+                ds = DERIV_SYMBOL_MAP.get(p)
+                if ds:
+                    symbol_to_pair[ds] = p
+                    valid_symbols.append(ds)
+                    
+            if not valid_symbols:
+                return pd.DataFrame()
+                
+            granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else 60)
+            url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+            
+            # Run async batch fetch synchronously
+            async def _fetch_batch_async():
+                dfs = {}
+                async with websockets.connect(url, ping_interval=None) as ws:
+                    for ds in valid_symbols:
+                        req = {
+                            "ticks_history": ds,
+                            "adjust_start_time": 1,
+                            "count": count,
+                            "end": "latest",
+                            "style": "candles",
+                            "granularity": granularity
+                        }
+                        await ws.send(json.dumps(req))
+                        
+                    for _ in range(len(valid_symbols)):
+                        try:
+                            resp = await ws.recv()
+                            data = json.loads(resp)
+                            echo = data.get("echo_req", {})
+                            ds_resp = echo.get("ticks_history")
+                            pair_name = symbol_to_pair.get(ds_resp)
+                            
+                            if not pair_name or "error" in data:
+                                continue
+                                
+                            candles = data.get("candles", [])
+                            if not candles:
+                                continue
+                                
+                            records = []
+                            for c in candles:
+                                records.append({
+                                    "Time": pd.to_datetime(c["epoch"], unit="s", utc=True),
+                                    "Open": float(c["open"]),
+                                    "High": float(c["high"]),
+                                    "Low": float(c["low"]),
+                                    "Close": float(c["close"]),
+                                    "Volume": 0.0
+                                })
+                            df = pd.DataFrame(records)
+                            df.set_index("Time", inplace=True)
+                            dfs[pair_name] = df
+                        except Exception as ext_err:
+                            print(f"[Deriv Batch Parse Error]: {ext_err}")
+                return dfs
+                
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                dfs = loop.run_until_complete(_fetch_batch_async())
+            finally:
+                loop.close()
+                
+            if dfs:
+                df_batch = pd.concat(dfs.values(), axis=1, keys=dfs.keys())
+                return df_batch
+            return pd.DataFrame()
+            
+        except Exception as e:
+            print(f"[Deriv Batch Download Error]: {e}")
+            return pd.DataFrame()
+            
     try:
         df_batch = yf.download(pairs, period=period, interval=timeframe, group_by="ticker", progress=False, threads=True)
         return df_batch
