@@ -3069,54 +3069,92 @@ if st.sidebar.button("🔍 Generate Summary", use_container_width=True):
                 report_title = f"DAILY REPORT ({target_date.strftime('%Y-%m-%d')})"
                 
             if signals:
-                # Calculate Stats
-                stats = {}
-                total_wins = 0
-                total_losses = 0
-                for tf in ["1m", "5m", "15m"]:
-                    tf_sigs = [s for s in signals if s["timeframe"].upper() == tf.upper()]
-                    wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
-                    losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
-                    total_wl = wins + losses
-                    winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
-                    stats[tf] = {
-                        "wins": wins,
-                        "losses": losses,
-                        "winrate": winrate,
-                        "signals": tf_sigs
-                    }
-                    total_wins += wins
-                    total_losses += losses
-                    
+                # Define helper classification function
+                def get_asset_class(pair_str):
+                    p = str(pair_str).upper()
+                    if p.startswith("VOL_") or p.startswith("CRASH_") or p.startswith("BOOM_") or p.startswith("1HZ") or p.startswith("R_") or p.startswith("STD"):
+                        return "SYNTHETIC INDICES"
+                    elif "BTC" in p or "ETH" in p or "LTC" in p or "SOL" in p:
+                        return "CRYPTOCURRENCIES"
+                    elif "GC=F" in p or "SI=F" in p or "CL=F" in p:
+                        return "COMMODITIES"
+                    else:
+                        return "FOREX CURRENCIES"
+                        
+                asset_classes = ["SYNTHETIC INDICES", "FOREX CURRENCIES", "CRYPTOCURRENCIES", "COMMODITIES"]
+                asset_emojis = {
+                    "SYNTHETIC INDICES": "🪙",
+                    "FOREX CURRENCIES": "💱",
+                    "CRYPTOCURRENCIES": "⚡",
+                    "COMMODITIES": "🛠️"
+                }
+                
+                # Exclude 1m signals completely
+                filtered_signals = [s for s in signals if s["timeframe"].lower() in ["5m", "15m"]]
+                
+                total_wins = sum(1 for s in filtered_signals if s["status"] == "WIN")
+                total_losses = sum(1 for s in filtered_signals if s["status"] in ["LOSS", "TIE"])
                 overall_wl = total_wins + total_losses
                 overall_winrate = (total_wins / overall_wl) * 100 if overall_wl > 0 else 0.0
                 
                 report_text = f"📊 <b>{report_title}</b>\n"
                 report_text += f"🎯 <b>Overall Accuracy:</b> <b>{overall_winrate:.1f}%</b> ({total_wins}W - {total_losses}L)\n\n"
                 
-                for tf in ["1m", "5m", "15m"]:
-                    tf_disp = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
-                    report_text += f"⏱️ <b>{tf_disp} Trades</b> ({stats[tf]['wins']}W - {stats[tf]['losses']}L | {stats[tf]['winrate']:.1f}%):\n"
-                    if stats[tf]["signals"]:
-                        for sig in stats[tf]["signals"][:15]: # Limit to latest 15 trades per TF to prevent long messages
-                            sig_time_utc = pd.to_datetime(sig["time"])
-                            if sig_time_utc.tzinfo is None:
-                                sig_time_utc = pytz.utc.localize(sig_time_utc)
-                            sig_time_ry = sig_time_utc.astimezone(tz_ry)
-                            time_str = sig_time_ry.strftime("%I:%M %p")
-                            pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                for ac in asset_classes:
+                    ac_sigs = [s for s in filtered_signals if get_asset_class(s["pair"]) == ac]
+                    
+                    report_text += f"───────────────────\n"
+                    report_text += f"{asset_emojis[ac]} <b>{ac}</b>\n"
+                    report_text += f"───────────────────\n"
+                    
+                    for tf in ["5m", "15m"]:
+                        tf_disp = "5 Min" if tf == "5m" else "15 Min"
+                        tf_sigs = [s for s in ac_sigs if s["timeframe"].lower() == tf.lower()]
+                        
+                        report_text += f"📈 <b>{tf_disp} Timeframe:</b>\n"
+                        if tf_sigs:
+                            wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
+                            losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
+                            total_wl = wins + losses
+                            winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
                             
-                            status_emoji = "⏳"
-                            if sig["status"] == "WIN":
-                                status_emoji = "🟢 WIN"
-                            elif sig["status"] == "LOSS":
-                                status_emoji = "🔴 LOSS"
-                            elif sig["status"] == "TIE":
-                                status_emoji = "⚪ TIE"
-                            report_text += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji}\n"
+                            for sig in tf_sigs[:15]: # Limit to latest 15 trades per TF to prevent long messages
+                                sig_time_utc = pd.to_datetime(sig["time"])
+                                if sig_time_utc.tzinfo is None:
+                                    sig_time_utc = pytz.utc.localize(sig_time_utc)
+                                sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                                time_str = sig_time_ry.strftime("%I:%M %p")
+                                pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                                
+                                status_emoji = "⏳"
+                                if sig["status"] == "WIN":
+                                    status_emoji = "🟢 WIN"
+                                elif sig["status"] == "LOSS":
+                                    status_emoji = "🔴 LOSS"
+                                elif sig["status"] == "TIE":
+                                    status_emoji = "⚪ TIE"
+                                conf_val = sig.get("confirmations", "N/A")
+                                strength_val = sig.get("strength", "NORMAL")
+                                report_text += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val})</i>\n"
+                                
+                            report_text += f"<i>Stats: {wins}W - {losses}L | Win Rate: {winrate:.1f}%</i>\n"
+                        else:
+                            report_text += "<i>No trades triggered.</i>\n"
+                        report_text += "\n"
+                
+                # Strategy breakdown
+                report_text += "📊 <b>SUMMARY BY STRATEGY:</b>\n"
+                for mode in ["SNIPER", "BALANCED", "AGGRESSIVE"]:
+                    mode_sigs = [s for s in filtered_signals if mode in str(s.get("strength", ""))]
+                    if mode_sigs:
+                        m_wins = sum(1 for s in mode_sigs if s["status"] == "WIN")
+                        m_losses = sum(1 for s in mode_sigs if s["status"] in ["LOSS", "TIE"])
+                        m_total = m_wins + m_losses
+                        m_wr = (m_wins / m_total * 100) if m_total > 0 else 0.0
+                        report_text += f"• <b>{mode}:</b> {m_wins}W - {m_losses}L (Win Rate: <b>{m_wr:.1f}%</b>)\n"
                     else:
-                        report_text += "<i>No trades triggered.</i>\n"
-                    report_text += "\n"
+                        report_text += f"• <b>{mode}:</b> No trades\n"
+                report_text += "\n"
                 
                 st.session_state.custom_report_text = report_text
                 st.session_state.custom_report_title = report_title

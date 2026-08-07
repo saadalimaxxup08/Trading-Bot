@@ -1817,45 +1817,76 @@ def send_hourly_summary():
         msg = f"🕒 <b>HOURLY TRADING REPORT</b>\n"
         msg += f"⏱️ <b>Period:</b> <code>{period_str}</code> (Jeddah Time)\n\n"
         
-        for tf in ["1m", "5m", "15m"]:
-            tf_display = "1 Min" if tf == "1m" else ("5 Min" if tf == "5m" else "15 Min")
-            tf_sigs = [s for s in signals if s["timeframe"].upper() == tf.upper()]
-            
-            wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
-            losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
-            ties = sum(1 for s in tf_sigs if s["status"] == "TIE")
-            total_wl = wins + losses
-            winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
-            
-            msg += f"<b>{tf_display} Trades</b> ({wins}W - {losses}L | {winrate:.1f}%):\n"
-            if tf_sigs:
-                for sig in tf_sigs:
-                    sig_time_utc = pd.to_datetime(sig["time"])
-                    if sig_time_utc.tzinfo is None:
-                        sig_time_utc = pytz.utc.localize(sig_time_utc)
-                    sig_time_ry = sig_time_utc.astimezone(tz_ry)
-                    time_str = sig_time_ry.strftime("%I:%M %p")
-                    pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
-                    
-                    status_emoji = "⏳"
-                    if sig["status"] == "WIN":
-                        status_emoji = "🟢 WIN"
-                    elif sig["status"] == "LOSS":
-                        status_emoji = "🔴 LOSS"
-                    elif sig["status"] == "TIE":
-                        status_emoji = "⚪ TIE"
-                    conf_val = sig.get("confirmations", "N/A")
-                    strength_val = sig.get("strength", "NORMAL")
-                    expiry_val = "15m Exp" if ("SNIPER" in strength_val or "STRONG" in strength_val) else "5m Exp"
-                    msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val} - {expiry_val})</i>\n"
+        # Helper classification function
+        def get_asset_class(pair_str):
+            p = str(pair_str).upper()
+            if p.startswith("VOL_") or p.startswith("CRASH_") or p.startswith("BOOM_") or p.startswith("1HZ") or p.startswith("R_") or p.startswith("STD"):
+                return "SYNTHETIC INDICES"
+            elif "BTC" in p or "ETH" in p or "LTC" in p or "SOL" in p:
+                return "CRYPTOCURRENCIES"
+            elif "GC=F" in p or "SI=F" in p or "CL=F" in p:
+                return "COMMODITIES"
             else:
-                msg += "<i>No trades triggered.</i>\n"
-            msg += "\n"
+                return "FOREX CURRENCIES"
+                
+        asset_classes = ["SYNTHETIC INDICES", "FOREX CURRENCIES", "CRYPTOCURRENCIES", "COMMODITIES"]
+        asset_emojis = {
+            "SYNTHETIC INDICES": "🪙",
+            "FOREX CURRENCIES": "💱",
+            "CRYPTOCURRENCIES": "⚡",
+            "COMMODITIES": "🛠️"
+        }
+        
+        # Exclude 1m signals completely
+        filtered_signals = [s for s in signals if s["timeframe"].lower() in ["5m", "15m"]]
+        
+        for ac in asset_classes:
+            ac_sigs = [s for s in filtered_signals if get_asset_class(s["pair"]) == ac]
             
+            msg += f"───────────────────\n"
+            msg += f"{asset_emojis[ac]} <b>{ac}</b>\n"
+            msg += f"───────────────────\n"
+            
+            # Display timeframes (5m, 15m) only. Exclude 1m.
+            for tf in ["5m", "15m"]:
+                tf_display = "5 Min" if tf == "5m" else "15 Min"
+                tf_sigs = [s for s in ac_sigs if s["timeframe"].lower() == tf.lower()]
+                
+                msg += f"📈 <b>{tf_display} Timeframe:</b>\n"
+                if tf_sigs:
+                    wins = sum(1 for s in tf_sigs if s["status"] == "WIN")
+                    losses = sum(1 for s in tf_sigs if s["status"] in ["LOSS", "TIE"])
+                    total_wl = wins + losses
+                    winrate = (wins / total_wl) * 100 if total_wl > 0 else 0.0
+                    
+                    for sig in tf_sigs:
+                        sig_time_utc = pd.to_datetime(sig["time"])
+                        if sig_time_utc.tzinfo is None:
+                            sig_time_utc = pytz.utc.localize(sig_time_utc)
+                        sig_time_ry = sig_time_utc.astimezone(tz_ry)
+                        time_str = sig_time_ry.strftime("%I:%M %p")
+                        pair_clean = sig["pair"].replace("=X", "").replace("-USD", "/USD")
+                        
+                        status_emoji = "⏳"
+                        if sig["status"] == "WIN":
+                            status_emoji = "🟢 WIN"
+                        elif sig["status"] == "LOSS":
+                            status_emoji = "🔴 LOSS"
+                        elif sig["status"] == "TIE":
+                            status_emoji = "⚪ TIE"
+                        conf_val = sig.get("confirmations", "N/A")
+                        strength_val = sig.get("strength", "NORMAL")
+                        msg += f"• <code>{time_str}</code> | <b>{pair_clean}</b> | {status_emoji} | <i>{conf_val} ({strength_val})</i>\n"
+                    
+                    msg += f"<i>Stats: {wins}W - {losses}L | Win Rate: {winrate:.1f}%</i>\n"
+                else:
+                    msg += "<i>No trades triggered.</i>\n"
+                msg += "\n"
+                
         # Strategy breakdown
-        msg += "📊 <b>STRATEGY PERFORMANCE BREAKDOWN:</b>\n"
+        msg += "📊 <b>SUMMARY BY STRATEGY:</b>\n"
         for mode in ["SNIPER", "BALANCED", "AGGRESSIVE"]:
-            mode_sigs = [s for s in signals if mode in str(s.get("strength", ""))]
+            mode_sigs = [s for s in filtered_signals if mode in str(s.get("strength", ""))]
             if mode_sigs:
                 m_wins = sum(1 for s in mode_sigs if s["status"] == "WIN")
                 m_losses = sum(1 for s in mode_sigs if s["status"] in ["LOSS", "TIE"])
@@ -1948,21 +1979,28 @@ def resolve_pending_signals():
                 exit_time_raw = pd.to_datetime(sig["exit_time"])
                 exit_time_utc = exit_time_raw.tz_convert(pytz.utc) if exit_time_raw.tzinfo else pytz.utc.localize(exit_time_raw)
                 
-                # Calculate when the exit candle has actually closed
                 delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else (datetime.timedelta(minutes=5) if tf_lower == "5m" else datetime.timedelta(minutes=15)))
-                actual_close_time_utc = exit_time_utc + delta_t
                 
-                if now_utc > actual_close_time_utc:
-                    # Let's locate the closest candle matching exit time in index
-                    # Match index by localizing yfinance index to UTC
+                # The exit price candle closes at exit_time_utc. We wait 10 seconds buffer.
+                resolve_allowed_time = exit_time_utc + datetime.timedelta(seconds=10)
+                
+                if now_utc > resolve_allowed_time:
+                    # Let's locate the closest candle matching the exit time in index
+                    # Match index by localizing index to UTC
                     df_utc_index = df.index.tz_convert(pytz.utc) if df.index.tzinfo else df.index.map(pytz.utc.localize)
                     
-                    # Target index
-                    match_mask = (df_utc_index >= exit_time_utc)
+                    # The exit price is the close price of the candle that closed at exit_time_utc.
+                    # In our dataframe, candles are indexed by start time, so the candle closes at exit_time_utc
+                    # if its start time was exit_time_utc - delta_t.
+                    target_time = exit_time_utc - delta_t
+                    match_mask = (df_utc_index <= target_time)
                     if match_mask.any():
-                        # Find the first index where timestamp is >= exit time (the exit candle closed price)
-                        match_idx = np.where(match_mask)[0][0]
-                        exit_price = float(df.iloc[match_idx]['Close'])
+                        match_idx = np.where(match_mask)[0][-1]
+                        matched_time = df_utc_index[match_idx]
+                        
+                        # Verify the index timestamp is within 60 seconds of target start time
+                        if abs((matched_time - target_time).total_seconds()) <= 60:
+                            exit_price = float(df.iloc[match_idx]['Close'])
                         entry_price = float(sig["entry_price"])
                         
                         status = "TIE"
