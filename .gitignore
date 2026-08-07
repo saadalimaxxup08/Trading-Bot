@@ -14,3 +14,7 @@ __pycache__/
 news_cache.json
 signals_db.json
 .streamlit/
+
+# Ignore AI agents brain folder to keep strategy files private
+.agents/
+
