@@ -140,7 +140,7 @@ ATR_THRESHOLDS = {
 }
 
 # Scan settings
-TIMEFRAMES = ["5m", "15m"]
+TIMEFRAMES = ["5m", "15m", "30m", "1h"]
 
 # Debug Mode tracking variables
 LAST_DEBUG_REPORT_TIME = None
@@ -1192,7 +1192,7 @@ def download_deriv_candles(pair, timeframe, count=250):
             print(f"[Deriv Data Loader]: Pair {pair} not mapped to Deriv symbols.")
             return pd.DataFrame()
             
-        granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else 60)
+        granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else (1800 if timeframe == "30m" else (3600 if timeframe == "1h" else 60)))
         
         # Run async function synchronously
         loop = asyncio.new_event_loop()
@@ -1253,7 +1253,7 @@ def download_market_batch(pairs, timeframe, period="5d", count=250):
             if not valid_symbols:
                 return pd.DataFrame()
                 
-            granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else 60)
+            granularity = 300 if timeframe == "5m" else (900 if timeframe == "15m" else (1800 if timeframe == "30m" else (3600 if timeframe == "1h" else 60)))
             url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
             
             # Run async batch fetch synchronously
@@ -1327,7 +1327,7 @@ def download_market_batch(pairs, timeframe, period="5d", count=250):
         return pd.DataFrame()
 
 def process_market_signals(pair, timeframe, df=None):
-    lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else "1d")
+    lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else ("10d" if timeframe == "30m" else ("20d" if timeframe == "1h" else "1d")))
     
     try:
         if df is None or df.empty:
@@ -1343,7 +1343,7 @@ def process_market_signals(pair, timeframe, df=None):
 
         # ── Pre-Alert Evaluation (Wilder's ADX & V5 Engine Support) ──
         now_utc = datetime.datetime.now(pytz.utc)
-        tf_minutes = 5 if timeframe == "5m" else 15
+        tf_minutes = 5 if timeframe == "5m" else (15 if timeframe == "15m" else (30 if timeframe == "30m" else 60))
         is_pre_alert_window = (now_utc.minute % tf_minutes == (tf_minutes - 1)) and (30 <= now_utc.second <= 59)
         
         if is_pre_alert_window:
@@ -1397,7 +1397,11 @@ def process_market_signals(pair, timeframe, df=None):
                 print(f"[PRE-ALERT ERROR]: {pre_err}")
 
         # Smart Closed Candle selection (bypass yfinance active candle latency)
-        delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else (datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)))
+        delta_t = (datetime.timedelta(minutes=1) if timeframe == "1m" else 
+                   (datetime.timedelta(minutes=5) if timeframe == "5m" else 
+                    (datetime.timedelta(minutes=15) if timeframe == "15m" else 
+                     (datetime.timedelta(minutes=30) if timeframe == "30m" else 
+                      (datetime.timedelta(hours=1) if timeframe == "1h" else datetime.timedelta(minutes=15))))))
         
         last_candle_time = df.index[-1]
         if last_candle_time.tzinfo is None:
@@ -1443,9 +1447,9 @@ def process_market_signals(pair, timeframe, df=None):
 
         # Run Sniper, Balanced, and Aggressive strategies in parallel
         strategies = [
-            {"mode": "SNIPER", "call_col": "Sniper_Call_Score", "put_col": "Sniper_Put_Score", "min_score": 5, "expiry": "15 Minutes", "expiry_delta": delta_t * 3},
-            {"mode": "BALANCED", "call_col": "Balanced_Call_Score", "put_col": "Balanced_Put_Score", "min_score": 5, "expiry": "5 Minutes" if timeframe == "5m" else "15 Minutes", "expiry_delta": delta_t},
-            {"mode": "AGGRESSIVE", "call_col": "Aggressive_Call_Score", "put_col": "Aggressive_Put_Score", "min_score": 5, "expiry": "5 Minutes" if timeframe == "5m" else "15 Minutes", "expiry_delta": delta_t}
+            {"mode": "SNIPER", "call_col": "Sniper_Call_Score", "put_col": "Sniper_Put_Score", "min_score": 5, "expiry": "15 Minutes" if timeframe == "5m" else ("45 Minutes" if timeframe == "15m" else ("90 Minutes" if timeframe == "30m" else "3 Hours")), "expiry_delta": delta_t * 3},
+            {"mode": "BALANCED", "call_col": "Balanced_Call_Score", "put_col": "Balanced_Put_Score", "min_score": 5, "expiry": f"{tf_minutes} Minutes" if tf_minutes < 60 else "1 Hour", "expiry_delta": delta_t},
+            {"mode": "AGGRESSIVE", "call_col": "Aggressive_Call_Score", "put_col": "Aggressive_Put_Score", "min_score": 5, "expiry": f"{tf_minutes} Minutes" if tf_minutes < 60 else "1 Hour", "expiry_delta": delta_t}
         ]
 
         signal_fired_on_this_candle = False
@@ -1838,7 +1842,7 @@ def send_hourly_summary():
         }
         
         # Exclude 1m signals completely
-        filtered_signals = [s for s in signals if s["timeframe"].lower() in ["5m", "15m"]]
+        filtered_signals = [s for s in signals if s["timeframe"].lower() in ["5m", "15m", "30m", "1h"]]
         
         for ac in asset_classes:
             ac_sigs = [s for s in filtered_signals if get_asset_class(s["pair"]) == ac]
@@ -1847,9 +1851,9 @@ def send_hourly_summary():
             msg += f"{asset_emojis[ac]} <b>{ac}</b>\n"
             msg += f"───────────────────\n"
             
-            # Display timeframes (5m, 15m) only. Exclude 1m.
-            for tf in ["5m", "15m"]:
-                tf_display = "5 Min" if tf == "5m" else "15 Min"
+            # Display timeframes (5m, 15m, 30m, 1h) only. Exclude 1m.
+            for tf in ["5m", "15m", "30m", "1h"]:
+                tf_display = "5 Min" if tf == "5m" else ("15 Min" if tf == "15m" else ("30 Min" if tf == "30m" else "1 Hour"))
                 tf_sigs = [s for s in ac_sigs if s["timeframe"].lower() == tf.lower()]
                 
                 msg += f"📈 <b>{tf_display} Timeframe:</b>\n"
@@ -1979,7 +1983,11 @@ def resolve_pending_signals():
                 exit_time_raw = pd.to_datetime(sig["exit_time"])
                 exit_time_utc = exit_time_raw.tz_convert(pytz.utc) if exit_time_raw.tzinfo else pytz.utc.localize(exit_time_raw)
                 
-                delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else (datetime.timedelta(minutes=5) if tf_lower == "5m" else datetime.timedelta(minutes=15)))
+                delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else 
+                           (datetime.timedelta(minutes=5) if tf_lower == "5m" else 
+                            (datetime.timedelta(minutes=15) if tf_lower == "15m" else 
+                             (datetime.timedelta(minutes=30) if tf_lower == "30m" else 
+                              (datetime.timedelta(hours=1) if tf_lower == "1h" else datetime.timedelta(minutes=15))))))
                 
                 # The exit price candle closes at exit_time_utc. We wait 1 minute buffer to avoid signal congestion.
                 resolve_allowed_time = exit_time_utc + datetime.timedelta(minutes=1)

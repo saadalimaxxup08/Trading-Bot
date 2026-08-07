@@ -782,14 +782,19 @@ def local_resolve_pending_signals():
                 exit_time_utc = pytz.utc.localize(exit_time_utc)
                 
             tf_lower = sig.get("timeframe", "15m").lower()
-            delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else (datetime.timedelta(minutes=5) if tf_lower == "5m" else datetime.timedelta(minutes=15)))
+            delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else 
+                       (datetime.timedelta(minutes=5) if tf_lower == "5m" else 
+                        (datetime.timedelta(minutes=15) if tf_lower == "15m" else 
+                         (datetime.timedelta(minutes=30) if tf_lower == "30m" else 
+                          (datetime.timedelta(hours=1) if tf_lower == "1h" else datetime.timedelta(minutes=15))))))
             
             # Wait for exit candle to close fully before resolving
             actual_close_time_utc = exit_time_utc + delta_t
             
             if now_utc >= actual_close_time_utc:
                 pair = sig["pair"]
-                df = download_market_data(pair, tf_lower, period="2d" if tf_lower == "5m" else "5d")
+                lookback = "2d" if tf_lower == "5m" else ("5d" if tf_lower == "15m" else ("10d" if tf_lower == "30m" else ("20d" if tf_lower == "1h" else "1d")))
+                df = download_market_data(pair, tf_lower, period=lookback)
                 if df.empty:
                     continue
                     
@@ -1073,8 +1078,8 @@ def start_background_scanner():
                 print(f"[HEARTBEAT] Cloud Background Scanner active and scanning 8 pairs - {datetime.datetime.now().strftime('%H:%M:%S')}")
                 
                 # Run the scanning process using high-speed parallel batch downloading
-                for timeframe in ["5m", "15m"]:
-                    lookback = "2d" if timeframe == "5m" else "5d"
+                for timeframe in ["5m", "15m", "30m", "1h"]:
+                    lookback = "2d" if timeframe == "5m" else ("5d" if timeframe == "15m" else ("10d" if timeframe == "30m" else ("20d" if timeframe == "1h" else "1d")))
                     try:
                         open_pairs = [p for p in RADAR_PAIRS if is_market_open(p)]
                         df_batch = download_market_batch(open_pairs, timeframe, period=lookback)
@@ -1087,7 +1092,7 @@ def start_background_scanner():
                                     
                                 # Check if we are in the Pre-Alert window (30 seconds before the candle closes)
                                 now_utc = datetime.datetime.now(pytz.utc)
-                                tf_minutes = 5 if timeframe == "5m" else 15
+                                tf_minutes = 5 if timeframe == "5m" else (15 if timeframe == "15m" else (30 if timeframe == "30m" else 60))
                                 is_pre_alert_window = (now_utc.minute % tf_minutes == (tf_minutes - 1)) and (30 <= now_utc.second <= 59)
                                     
                                 if is_pre_alert_window:
@@ -1134,7 +1139,10 @@ def start_background_scanner():
                                         print(f"Pre-alert calculation error: {pre_e}")
                                         
                                 # Determine expected closed candle time to evaluate cancel outcome
-                                delta_t = datetime.timedelta(minutes=5) if timeframe == "5m" else datetime.timedelta(minutes=15)
+                                delta_t = (datetime.timedelta(minutes=5) if timeframe == "5m" else 
+                                           (datetime.timedelta(minutes=15) if timeframe == "15m" else 
+                                            (datetime.timedelta(minutes=30) if timeframe == "30m" else 
+                                             (datetime.timedelta(hours=1) if timeframe == "1h" else datetime.timedelta(minutes=15)))))
                                 last_candle_time = df_pair.index[-1]
                                 last_candle_end = last_candle_time + delta_t
                                 if now_utc >= last_candle_end:
@@ -2699,7 +2707,7 @@ if selected_pair_sb != active_pair:
     st.rerun()
 
 # Timeframe selection in sidebar
-timeframe_map = {"5 Minutes": "5m", "15 Minutes": "15m"}
+timeframe_map = {"5 Minutes": "5m", "15 Minutes": "15m", "30 Minutes": "30m", "1 Hour": "1h"}
 timeframe_sel = st.sidebar.selectbox("TIMEFRAME SELECT", list(timeframe_map.keys()), index=1)
 timeframe = timeframe_map[timeframe_sel]
 
@@ -2715,7 +2723,7 @@ show_patterns = st.sidebar.checkbox("Show Candlestick Patterns", value=True)
 # Cache live data downloads with 15s TTL to prevent rate limit blocks and make pair switching instant
 @st.cache_data(ttl=15)
 def get_live_data(pair, tf):
-    lookback = "2d" if tf == "5m" else ("5d" if tf == "15m" else "1d")
+    lookback = "2d" if tf == "5m" else ("5d" if tf == "15m" else ("10d" if tf == "30m" else ("20d" if tf == "1h" else "1d")))
     try:
         df = download_market_data(pair, tf, period=lookback)
         return df
@@ -3807,6 +3815,8 @@ with col_center:
                 # Filter by timeframes
                 today_5m_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "5M")
                 today_15m_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "15M")
+                today_30m_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "30M")
+                today_1h_count = sum(1 for s in all_today_sigs if s["timeframe"].upper() == "1H")
                 
                 # Fetch last 5 signals regardless of date
                 res_5 = supabase_client.table("signals").select("time,confirmations,status,type,diagnostics,pair,strength").neq("pair", "SETTINGS").neq("pair", "CONFIG").order("time", desc=True).limit(5).execute()
@@ -3814,11 +3824,15 @@ with col_center:
             except Exception as health_e:
                 st.error(f"Error fetching health stats: {health_e}")
                 
-        stat_c1, stat_c2 = st.columns(2)
+        stat_c1, stat_c2, stat_c3, stat_c4 = st.columns(4)
         with stat_c1:
             st.metric("5M Signals Today", today_5m_count)
         with stat_c2:
             st.metric("15M Signals Today", today_15m_count)
+        with stat_c3:
+            st.metric("30M Signals Today", today_30m_count)
+        with stat_c4:
+            st.metric("1H Signals Today", today_1h_count)
         
         st.markdown("**Last 5 Signals Table**")
         if last_5_sigs:
