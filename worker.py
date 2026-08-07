@@ -2178,15 +2178,15 @@ if __name__ == "__main__":
             ast_tz = pytz.timezone("Asia/Riyadh")
             now_ast = datetime.datetime.now(ast_tz)
             
-            # 1. Hourly Summary Trigger (at the start of every hour)
+            # 1. Hourly Summary Trigger (1 minute after the hour to avoid signal congestion)
             hour_key = now_ast.strftime("%Y-%m-%d-%H")
-            if now_ast.minute == 0 and LAST_HOURLY_SENT_HOUR != hour_key:
+            if now_ast.minute == 1 and LAST_HOURLY_SENT_HOUR != hour_key:
                 send_hourly_summary()
                 LAST_HOURLY_SENT_HOUR = hour_key
                 
-            # 2. Daily Summary Trigger (at 9:00 PM Saudi Arabia Time)
+            # 2. Daily Summary Trigger (at 9:01 PM Saudi Arabia Time)
             date_key = now_ast.strftime("%Y-%m-%d")
-            if now_ast.hour == 21 and now_ast.minute == 0 and LAST_DAILY_SENT_DATE != date_key:
+            if now_ast.hour == 21 and now_ast.minute == 1 and LAST_DAILY_SENT_DATE != date_key:
                 send_daily_summary()
                 LAST_DAILY_SENT_DATE = date_key
 
