@@ -57,7 +57,7 @@ def is_market_open(pair):
     day = now_utc.weekday() # 0 = Monday, ..., 4 = Friday, 5 = Saturday, 6 = Sunday
     hour = now_utc.hour
     
-    if day == 4 and hour >= 21: # Friday night
+    if day == 4 and hour >= 15: # Friday early close (after 6:00 PM AST / 15:00 UTC)
         return False
     if day == 5: # Saturday
         return False
