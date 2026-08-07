@@ -2108,6 +2108,19 @@ def check_signals(df, pair=None):
         is_real_market = not (p.startswith("VOL_") or p.startswith("CRASH_") or p.startswith("BOOM_") or p.startswith("1HZ") or p.startswith("R_") or p.startswith("STD"))
         
         close_val = df.loc[idx, 'Close']
+        open_val = df.loc[idx, 'Open']
+        high_val = df.loc[idx, 'High']
+        low_val = df.loc[idx, 'Low']
+        
+        candle_range = high_val - low_val
+        lower_wick_ratio = 0.0
+        upper_wick_ratio = 0.0
+        if candle_range > 0:
+            lower_wick = min(open_val, close_val) - low_val
+            upper_wick = high_val - max(open_val, close_val)
+            lower_wick_ratio = lower_wick / candle_range
+            upper_wick_ratio = upper_wick / candle_range
+            
         ema200_val = df.loc[idx, 'EMA_200']
         
         real_market_call_ok = True
@@ -2140,7 +2153,7 @@ def check_signals(df, pair=None):
 
         # --- 1. SNIPER MODE (Strict V4.2) ---
         # CALL
-        if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx] and (not prev_low_outside):
+        if call_safe[idx] and macd_up_cross[idx] and bb_lower_touch[idx] and vol_increasing[idx] and (not prev_low_outside) and (lower_wick_ratio >= 0.35):
             v4_filters_ok = (
                 (ema_slope > 0) and
                 (40 <= rsi_val <= 55) and
@@ -2155,7 +2168,7 @@ def check_signals(df, pair=None):
                 if confirmations >= 5:
                     s_c = 5
         # PUT
-        if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx] and (not prev_high_outside):
+        if put_safe[idx] and macd_down_cross[idx] and bb_upper_touch[idx] and vol_increasing[idx] and (not prev_high_outside) and (upper_wick_ratio >= 0.35):
             v4_filters_ok = (
                 (ema_slope < 0) and
                 (45 <= rsi_val <= 60) and
@@ -2181,7 +2194,8 @@ def check_signals(df, pair=None):
                 (not atr_spike) and
                 bb_lower_touch[idx] and
                 real_market_call_ok and
-                (not prev_low_outside)
+                (not prev_low_outside) and
+                (lower_wick_ratio >= 0.35)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2199,7 +2213,8 @@ def check_signals(df, pair=None):
                 (not atr_spike) and
                 bb_low_proximity and
                 real_market_call_ok and
-                (not prev_low_outside)
+                (not prev_low_outside) and
+                (lower_wick_ratio >= 0.35)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2215,7 +2230,8 @@ def check_signals(df, pair=None):
                 (not atr_spike) and
                 bb_upper_touch[idx] and
                 real_market_put_ok and
-                (not prev_high_outside)
+                (not prev_high_outside) and
+                (upper_wick_ratio >= 0.35)
             )
             if balanced_filters_ok:
                 confirmations = 2
@@ -2233,7 +2249,8 @@ def check_signals(df, pair=None):
                 (not atr_spike) and
                 bb_high_proximity and
                 real_market_put_ok and
-                (not prev_high_outside)
+                (not prev_high_outside) and
+                (upper_wick_ratio >= 0.35)
             )
             if balanced_filters_ok:
                 confirmations = 2
