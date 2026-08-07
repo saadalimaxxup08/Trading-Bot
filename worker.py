@@ -2195,9 +2195,9 @@ if __name__ == "__main__":
                 send_diagnostics_heartbeat()
                 LAST_DIAGNOSTICS_SENT_TIME = now_ast
             
-            # Target 30 second refresh loop
+            # Target 10 second refresh loop for real-time instant signal delivery
             elapsed = time.time() - loop_start
-            sleep_duration = max(5.0, 30.0 - elapsed)
+            sleep_duration = max(2.0, 10.0 - elapsed)
             time.sleep(sleep_duration)
             
         except KeyboardInterrupt:
