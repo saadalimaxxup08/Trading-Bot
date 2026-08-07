@@ -689,7 +689,7 @@ def check_signals(df, pair=None):
         # CALL
         if not is_trending: # Sideways Market
             balanced_filters_ok = (
-                (35 <= rsi_val <= 65) and
+                (35 <= rsi_val <= 53) and
                 (not atr_spike) and
                 bb_lower_touch[idx] and
                 real_market_call_ok and
@@ -700,14 +700,14 @@ def check_signals(df, pair=None):
                 if ema_trend_call[idx]: confirmations += 1
                 if vol_increasing[idx]: confirmations += 1
                 if rsi_room_call[idx]: confirmations += 1
-                if confirmations >= 4:
+                if confirmations >= 5:
                     b_c = 5
         else: # Trending Market
             atr_val = df.loc[idx, 'ATR'] if 'ATR' in df.columns else 0.0001
             bb_low_proximity = (df.loc[idx, 'Close'] - bb_lower) <= (atr_val * 1.5)
             balanced_filters_ok = (
                 (ema_slope > 0) and
-                (38 <= rsi_val <= 58) and
+                (38 <= rsi_val <= 53) and
                 (not atr_spike) and
                 bb_low_proximity and
                 real_market_call_ok and
@@ -718,12 +718,12 @@ def check_signals(df, pair=None):
                 if ema_trend_call[idx]: confirmations += 1
                 if vol_increasing[idx]: confirmations += 1
                 if rsi_room_call[idx]: confirmations += 1
-                if confirmations >= 4:
+                if confirmations >= 5:
                     b_c = 5
         # PUT
         if not is_trending: # Sideways Market
             balanced_filters_ok = (
-                (35 <= rsi_val <= 65) and
+                (47 <= rsi_val <= 65) and
                 (not atr_spike) and
                 bb_upper_touch[idx] and
                 real_market_put_ok and
@@ -734,14 +734,14 @@ def check_signals(df, pair=None):
                 if ema_trend_put[idx]: confirmations += 1
                 if vol_increasing[idx]: confirmations += 1
                 if rsi_room_put[idx]: confirmations += 1
-                if confirmations >= 4:
+                if confirmations >= 5:
                     b_p = 5
         else: # Trending Market
             atr_val = df.loc[idx, 'ATR'] if 'ATR' in df.columns else 0.0001
             bb_high_proximity = (bb_upper - df.loc[idx, 'Close']) <= (atr_val * 1.5)
             balanced_filters_ok = (
                 (ema_slope < 0) and
-                (42 <= rsi_val <= 62) and
+                (47 <= rsi_val <= 62) and
                 (not atr_spike) and
                 bb_high_proximity and
                 real_market_put_ok and
@@ -752,36 +752,12 @@ def check_signals(df, pair=None):
                 if ema_trend_put[idx]: confirmations += 1
                 if vol_increasing[idx]: confirmations += 1
                 if rsi_room_put[idx]: confirmations += 1
-                if confirmations >= 4:
+                if confirmations >= 5:
                     b_p = 5
 
-        # --- 3. AGGRESSIVE MODE ---
-        # CALL
-        if (macd_up_cross[idx] or (df.loc[idx, 'Close'] < bb_lower)) and (not prev_low_outside):
-            agg_filters_ok = (
-                (30 <= rsi_val <= 70) and
-                (not atr_spike) and
-                real_market_call_ok
-            )
-            if agg_filters_ok:
-                confirmations = 1
-                if ema_trend_call[idx]: confirmations += 1
-                if vol_increasing[idx]: confirmations += 1
-                if confirmations >= 2:
-                    a_c = 5
-        # PUT
-        if (macd_down_cross[idx] or (df.loc[idx, 'Close'] > bb_upper)) and (not prev_high_outside):
-            agg_filters_ok = (
-                (30 <= rsi_val <= 70) and
-                (not atr_spike) and
-                real_market_put_ok
-            )
-            if agg_filters_ok:
-                confirmations = 1
-                if ema_trend_put[idx]: confirmations += 1
-                if vol_increasing[idx]: confirmations += 1
-                if confirmations >= 2:
-                    a_p = 5
+        # --- 3. AGGRESSIVE MODE (DISABLED) ---
+        a_c = 0
+        a_p = 0
                     
         sniper_calls.append(s_c)
         sniper_puts.append(s_p)
