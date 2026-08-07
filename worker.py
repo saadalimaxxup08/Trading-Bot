@@ -1981,8 +1981,8 @@ def resolve_pending_signals():
                 
                 delta_t = (datetime.timedelta(minutes=1) if tf_lower == "1m" else (datetime.timedelta(minutes=5) if tf_lower == "5m" else datetime.timedelta(minutes=15)))
                 
-                # The exit price candle closes at exit_time_utc. We wait 10 seconds buffer.
-                resolve_allowed_time = exit_time_utc + datetime.timedelta(seconds=10)
+                # The exit price candle closes at exit_time_utc. We wait 1 minute buffer to avoid signal congestion.
+                resolve_allowed_time = exit_time_utc + datetime.timedelta(minutes=1)
                 
                 if now_utc > resolve_allowed_time:
                     # Let's locate the closest candle matching the exit time in index
